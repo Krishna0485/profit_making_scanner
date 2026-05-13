@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>⚡ Profit Scanner — EMA5×EMA200 + MACD | 15M Intraday</title>
+<style>
+:root{
+  --bg:#0a0e1a;--panel:#111827;--border:#1f2937;--accent:#3b82f6;
+  --green:#22c55e;--red:#ef4444;--yellow:#f59e0b;--orange:#f97316;
+  --purple:#a855f7;--cyan:#06b6d4;--text:#e2e8f0;--muted:#94a3b8;--card:#161d2e;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',monospace;font-size:13px;min-height:100vh}
+.topbar{background:var(--panel);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;padding:10px 20px;flex-wrap:wrap;gap:8px}
+.topbar h1{font-size:15px;font-weight:700;color:var(--accent);letter-spacing:.5px}
+.topbar h1 span{color:var(--green)}
+.controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+select,button{background:#1e293b;border:1px solid var(--border);color:var(--text);
+  padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px}
+button.primary{background:var(--accent);border-color:var(--accent);font-weight:600}
+button.primary:hover{background:#2563eb}
+button.stop{background:#7f1d1d;border-color:#991b1b}
+.status-dot{width:8px;height:8px;border-radius:50%;background:#4b5563;display:inline-block;margin-right:4px}
+.status-dot.scanning{background:var(--green);animation:pulse 1s infinite}
+.status-dot.idle{background:var(--yellow)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.statsrow{display:flex;gap:8px;padding:10px 20px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:7px 14px;min-width:100px;text-align:center}
+.stat .val{font-size:20px;font-weight:700;line-height:1.2}
+.stat .lbl{font-size:10px;color:var(--muted);margin-top:2px}
+.stat.g .val{color:var(--green)}.stat.r .val{color:var(--red)}
+.stat.y .val{color:var(--yellow)}.stat.b .val{color:var(--accent)}
+.stat.p .val{color:var(--purple)}.stat.c .val{color:var(--cyan)}
+#progress-bar-wrap{height:3px;background:var(--border)}
+#progress-bar{height:100%;background:var(--accent);width:0%;transition:width .2s}
+#scan-info{font-size:11px;color:var(--muted);padding:4px 20px;background:var(--panel);border-bottom:1px solid var(--border)}
+.tabs{display:flex;gap:0;padding:0 20px;border-bottom:1px solid var(--border);margin-top:6px}
+.tab{padding:8px 14px;cursor:pointer;border-bottom:2px solid transparent;font-size:12px;color:var(--muted);user-select:none}
+.tab.active{color:var(--text);border-color:var(--accent)}
+.tab .cnt{display:inline-block;background:#1e293b;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px}
+.filterbar{display:flex;gap:8px;align-items:center;padding:8px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.filterbar label{font-size:11px;color:var(--muted)}
+.filterbar input[type=text]{background:#1e293b;border:1px solid var(--border);color:var(--text);
+  padding:4px 8px;border-radius:5px;font-size:12px;width:110px}
+.filterbar input[type=range]{width:70px;accent-color:var(--accent)}
+.fval{font-size:11px;color:var(--accent);min-width:28px}
+.table-wrap{padding:10px 20px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+thead th{background:#1a2235;color:var(--muted);padding:7px 7px;text-align:left;
+  border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none}
+thead th:hover{color:var(--text)}
+.sort-icon{font-size:10px;margin-left:2px;opacity:.5}
+tbody tr{border-bottom:1px solid #151e2e;transition:background .15s}
+tbody tr:hover{background:#1a2235}
+td{padding:5px 7px;white-space:nowrap}
+.badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600}
+.badge.buy{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)}
+.badge.sell{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)}
+.badge.cross{background:rgba(59,130,246,.15);color:#60a5fa;border:1px solid rgba(59,130,246,.3)}
+.badge.near{background:rgba(245,158,11,.15);color:var(--yellow);border:1px solid rgba(245,158,11,.3)}
+.badge.patt{background:rgba(168,85,247,.15);color:#c084fc;border:1px solid rgba(168,85,247,.3)}
+.badge.confirmed-b{background:rgba(34,197,94,.2);color:#86efac;border:1px solid rgba(34,197,94,.5);font-size:9px}
+.conf-wrap{display:inline-flex;align-items:center;gap:4px;font-weight:700}
+.conf-high{color:var(--green)}.conf-med{color:var(--yellow)}.conf-low{color:var(--orange)}
+.vol-ok{color:var(--green)}.vol-no{color:#4b5563}
+.rsi-ob{color:var(--red)}.rsi-os{color:var(--cyan)}.rsi-bull{color:var(--green)}.rsi-bear{color:var(--red)}
+.trend-bull{color:var(--green);font-size:10px}.trend-bear{color:var(--red);font-size:10px}
+.detail-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;
+  align-items:center;justify-content:center}
+.detail-overlay.open{display:flex}
+.detail-box{background:#111827;border:1px solid var(--border);border-radius:12px;
+  width:min(580px,96vw);max-height:92vh;overflow-y:auto;padding:20px}
+.detail-box h2{font-size:14px;margin-bottom:12px;display:flex;justify-content:space-between}
+.detail-close{cursor:pointer;color:var(--muted);font-size:18px;line-height:1}
+.dl-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}
+.dl-row{display:flex;flex-direction:column}
+.dl-row .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.dl-row .v{font-size:13px;font-weight:600;font-family:monospace}
+.dl-divider{border:none;border-top:1px solid var(--border);margin:10px 0}
+.trade-box{background:#0d1321;border-radius:8px;padding:12px;margin-top:8px}
+.trade-box .trow{display:flex;justify-content:space-between;padding:3px 0;font-size:12px}
+.trade-box .trow .tk{color:var(--muted)}
+.pattern-info{background:#0d1a2e;border:1px solid rgba(168,85,247,.3);border-radius:8px;padding:10px;margin-top:8px;font-size:12px}
+.pattern-info .pi-title{color:#c084fc;font-weight:700;margin-bottom:6px;font-size:13px}
+.pattern-info .pi-row{display:flex;justify-content:space-between;padding:2px 0}
+.pattern-info .pi-k{color:var(--muted)}
+#log{font-size:11px;color:var(--muted);padding:5px 20px;font-family:monospace;
+  border-top:1px solid var(--border);height:26px;overflow:hidden;background:var(--panel)}
+.empty{text-align:center;padding:40px;color:var(--muted);font-size:13px}
+@keyframes newrow{0%{background:#1e3a5f}100%{background:transparent}}
+.new-row{animation:newrow 2s ease-out forwards}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>⚡ PROFIT SCANNER — <span>EMA5 × EMA200 + MACD | 15M INTRADAY</span></h1>
+  <div class="controls">
+    <span><span class="status-dot idle" id="dot"></span><span id="status-txt">Idle</span></span>
+    <select id="tf-sel">
+      <option value="1m">1m</option>
+      <option value="5m">5m</option>
+      <option value="15m" selected>15m ★</option>
+      <option value="30m">30m</option>
+      <option value="1h">1h</option>
+      <option value="4h">4h</option>
+      <option value="1d">1d</option>
+    </select>
+    <select id="loop-sel">
+      <option value="0">One-shot</option>
+      <option value="5">Loop 5 min</option>
+      <option value="15" selected>Loop 15 min</option>
+      <option value="30">Loop 30 min</option>
+      <option value="60">Loop 60 min</option>
+    </select>
+    <button class="primary" id="scan-btn" onclick="startScan()">▶ SCAN NOW</button>
+    <button class="stop" id="stop-btn" onclick="stopScan()" style="display:none">■ STOP</button>
+  </div>
+</div>
+
+<div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+<div id="scan-info">Ready — select timeframe and click ▶ SCAN NOW</div>
+
+<div class="statsrow" id="statsrow">
+  <div class="stat b"><div class="val" id="s-total">—</div><div class="lbl">Pairs Scanned</div></div>
+  <div class="stat g"><div class="val" id="s-cbuy">0</div><div class="lbl">🔥 Cross BUY</div></div>
+  <div class="stat r"><div class="val" id="s-csell">0</div><div class="lbl">🔥 Cross SELL</div></div>
+  <div class="stat p"><div class="val" id="s-patt">0</div><div class="lbl">📐 Patterns</div></div>
+  <div class="stat c"><div class="val" id="s-hconf">0</div><div class="lbl">✅ High Conf ≥75</div></div>
+  <div class="stat y"><div class="val" id="s-near">0</div><div class="lbl">👀 Near Cross</div></div>
+  <div class="stat" style="margin-left:auto"><div class="val" id="s-time" style="font-size:13px;color:var(--muted)">—</div><div class="lbl">Last Scan</div></div>
+</div>
+
+<div class="filterbar">
+  <label>Search:</label>
+  <input type="text" id="sym-filter" placeholder="BTC, ETH…" oninput="renderTable()"/>
+  <label>Signal:</label>
+  <select id="sig-filter" onchange="renderTable()">
+    <option value="ALL">All</option>
+    <option value="BUY">BUY only</option>
+    <option value="SELL">SELL only</option>
+  </select>
+  <label>Type:</label>
+  <select id="type-filter" onchange="renderTable()">
+    <option value="ALL">All Types</option>
+    <option value="CROSSOVER">Crossover</option>
+    <option value="NEAR CROSS">Near Cross</option>
+    <option value="PATTERN">Patterns</option>
+  </select>
+  <label>Pattern:</label>
+  <select id="patt-filter" onchange="renderTable()">
+    <option value="ALL">All Patterns</option>
+    <option value="1-2-3 REVERSAL">1-2-3 Reversal</option>
+    <option value="CUP & HANDLE">Cup &amp; Handle</option>
+    <option value="BROADENING">Broadening</option>
+    <option value="ASC WEDGE">Asc Wedge</option>
+    <option value="DESC WEDGE">Desc Wedge</option>
+    <option value="BUMP & RUN">Bump &amp; Run</option>
+  </select>
+  <label>Min Conf%:</label>
+  <input type="range" id="conf-filter" min="0" max="90" step="5" value="0"
+    oninput="document.getElementById('conf-val').textContent=this.value+'%';renderTable()"/>
+  <span class="fval" id="conf-val">0%</span>
+  <label>Vol Spike:</label>
+  <input type="checkbox" id="vol-filter" onchange="renderTable()"/>
+</div>
+
+<div class="tabs">
+  <div class="tab active" id="tab-all"   onclick="switchTab('all')">All <span class="cnt" id="cnt-all">0</span></div>
+  <div class="tab"        id="tab-cross" onclick="switchTab('cross')">🔥 Crossover <span class="cnt" id="cnt-cross">0</span></div>
+  <div class="tab"        id="tab-patt"  onclick="switchTab('patt')">📐 Patterns <span class="cnt" id="cnt-patt">0</span></div>
+  <div class="tab"        id="tab-hconf" onclick="switchTab('hconf')">✅ High Conf <span class="cnt" id="cnt-hconf">0</span></div>
+  <div class="tab"        id="tab-near"  onclick="switchTab('near')">👀 Near Cross <span class="cnt" id="cnt-near">0</span></div>
+</div>
+
+<div class="table-wrap">
+  <table id="sig-table">
+    <thead>
+      <tr>
+        <th onclick="sortBy('sym')"># Pair <span class="sort-icon">⇅</span></th>
+        <th onclick="sortBy('price')">Price <span class="sort-icon">⇅</span></th>
+        <th onclick="sortBy('signal')">Signal <span class="sort-icon">⇅</span></th>
+        <th onclick="sortBy('type')">Type / Pattern <span class="sort-icon">⇅</span></th>
+        <th onclick="sortBy('confidence')">Conf% <span class="sort-icon">⇅</span></th>
+        <th onclick="sortBy('rsi')">RSI <span class="sort-icon">⇅</span></th>
+        <th>Trend</th>
+        <th>Vol</th>
+        <th onclick="sortBy('ema_gap_pct')">EMA Gap% <span class="sort-icon">⇅</span></th>
+        <th onclick="sortBy('atr_pct')">ATR% <span class="sort-icon">⇅</span></th>
+        <th onclick="sortBy('tp2_p')">TP2% <span class="sort-icon">⇅</span></th>
+        <th onclick="sortBy('sl_p')">SL% <span class="sort-icon">⇅</span></th>
+        <th onclick="sortBy('rr')">R:R <span class="sort-icon">⇅</span></th>
+        <th>Detail</th>
+      </tr>
+    </thead>
+    <tbody id="sig-body">
+      <tr><td colspan="14" class="empty">No scan run yet. Click ▶ SCAN NOW to begin.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div id="log">Ready…</div>
+
+<div class="detail-overlay" id="detail-overlay" onclick="if(event.target===this)closeDetail()">
+  <div class="detail-box" id="detail-box">
+    <h2><span id="d-title">Signal Detail</span><span class="detail-close" onclick="closeDetail()">✕</span></h2>
+    <div id="d-content"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════
+const DELTA_BASE   = "https://api.india.delta.exchange";
+const MA_LEN       = 5;
+const BB_LEN       = 20;
+const BB_MULT      = 2.0;
+const MIN_GAP_PCT  = 0.15;
+const MIN_ATR_PCT  = 0.08;
+const MIN_TP_PCT   = 0.25;
+const NEAR_CROSS   = 0.35;
+const CANDLE_LIMIT = 280;  // need 200+ for reliable EMA200
+const CONCURRENCY  = 8;
+const MIN_CONF     = 45;   // global min confidence to emit any signal
+
+const MINS_MAP = {"1m":1,"3m":3,"5m":5,"15m":15,"30m":30,"1h":60,"2h":120,"4h":240,"6h":360,"1d":1440};
+
+// ═══════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════
+let allSignals  = [];
+let sortKey     = "confidence";  // default sort
+let sortDir     = -1;
+let activeTab   = "all";
+let scanAborted = false;
+let loopTimer   = null;
+let signalCache = {};   // key -> {count, lastSig}
+
+// ═══════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════
+function fmtPrice(p){
+  if(!p||p===0)return "$0";
+  if(p>=10000) return "$"+p.toLocaleString("en-US",{minimumFractionDigits:1,maximumFractionDigits:1});
+  if(p>=1000)  return "$"+p.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(p>=100)   return "$"+p.toFixed(3);
+  if(p>=1)     return "$"+p.toFixed(4);
+  if(p>=0.1)   return "$"+p.toFixed(5);
+  if(p>=0.01)  return "$"+p.toFixed(6);
+  if(p>=0.001) return "$"+p.toFixed(7);
+  return "$"+p.toFixed(8);
+}
+function fmtSym(sym){
+  if(sym.endsWith("USD")&&!sym.endsWith("USDT")) return sym.slice(0,-3)+"/USD";
+  return sym;
+}
+function pctDiff(a,b){ return b?((a-b)/b*100):0; }
+function log(msg){
+  const el=document.getElementById("log");
+  el.textContent=`[${new Date().toLocaleTimeString()}] ${msg}`;
+}
+
+// ═══════════════════════════════════════════════════
+// API
+// ═══════════════════════════════════════════════════
+async function getSymbols(){
+  const r=await fetch(`${DELTA_BASE}/v2/products?contract_types=perpetual_futures`,
+    {headers:{"Accept":"application/json"}});
+  const j=await r.json();
+  return (j.result||[]).filter(p=>p.contract_type==="perpetual_futures").map(p=>p.symbol);
+}
+
+async function fetchCandles(symbol,resolution){
+  const now   = Math.floor(Date.now()/1000);
+  const start = now - MINS_MAP[resolution]*60*CANDLE_LIMIT;
+  const url   = `${DELTA_BASE}/v2/history/candles?symbol=${symbol}&resolution=${resolution}&start=${start}&end=${now}`;
+  try{
+    const r=await fetch(url,{headers:{"Accept":"application/json"}});
+    if(!r.ok) return null;
+    const j=await r.json();
+    const raw=j.result||[];
+    if(raw.length<30) return null;
+    const rows=raw.map(c=>({
+      time:parseInt(c.time),
+      open:parseFloat(c.open),high:parseFloat(c.high),
+      low:parseFloat(c.low),close:parseFloat(c.close),
+      vol:parseFloat(c.volume)
+    })).filter(c=>!isNaN(c.close)&&c.close>0);
+    rows.sort((a,b)=>a.time-b.time);
+    return rows.length>=30?rows:null;
+  }catch(e){return null;}
+}
+
+// ═══════════════════════════════════════════════════
+// INDICATORS
+// ═══════════════════════════════════════════════════
+function sma(arr,len){
+  return arr.map((_,i)=>{
+    if(i<len-1)return NaN;
+    let s=0;for(let k=i-len+1;k<=i;k++)s+=arr[k];return s/len;
+  });
+}
+function ema(arr,len){
+  const k=2/(len+1),res=new Array(arr.length).fill(NaN);
+  if(arr.length<len)return res;
+  let s=0;for(let i=0;i<len;i++)s+=arr[i];
+  res[len-1]=s/len;
+  for(let i=len;i<arr.length;i++) res[i]=arr[i]*k+res[i-1]*(1-k);
+  return res;
+}
+function stddev(arr,len,means){
+  return arr.map((_,i)=>{
+    if(i<len-1)return NaN;
+    let s=0;for(let k=i-len+1;k<=i;k++)s+=Math.pow(arr[k]-means[i],2);return Math.sqrt(s/len);
+  });
+}
+function bbands(closes,len,mult){
+  const mid=sma(closes,len),sd=stddev(closes,len,mid);
+  return{
+    mid,
+    upper:mid.map((m,i)=>isNaN(m)?NaN:m+mult*sd[i]),
+    lower:mid.map((m,i)=>isNaN(m)?NaN:m-mult*sd[i])
+  };
+}
+function calcRSI(closes,len=14){
+  const res=new Array(closes.length).fill(NaN);
+  if(closes.length<len+1)return res;
+  let ag=0,al=0;
+  for(let i=1;i<=len;i++){
+    const d=closes[i]-closes[i-1];
+    if(d>0)ag+=d;else al-=d;
+  }
+  ag/=len;al/=len;
+  res[len]=100-100/(1+(al===0?1e10:ag/al));
+  for(let i=len+1;i<closes.length;i++){
+    const d=closes[i]-closes[i-1];
+    ag=(ag*(len-1)+Math.max(d,0))/len;
+    al=(al*(len-1)+Math.max(-d,0))/len;
+    res[i]=100-100/(1+(al===0?1e10:ag/al));
+  }
+  return res;
+}
+function calcMACD(closes,fast=12,slow=26,sig=9){
+  const eFast=ema(closes,fast),eSlow=ema(closes,slow);
+  const macdLine=eFast.map((v,i)=>isNaN(v)||isNaN(eSlow[i])?NaN:v-eSlow[i]);
+  // Find first valid index in macdLine
+  let fv=-1;
+  for(let i=0;i<macdLine.length;i++){if(!isNaN(macdLine[i])){fv=i;break;}}
+  const sigLine=new Array(closes.length).fill(NaN);
+  if(fv<0||macdLine.length-fv<sig){
+    return{macd:macdLine,signal:sigLine,hist:macdLine.map(()=>NaN)};
+  }
+  let s=0;for(let i=fv;i<fv+sig;i++)s+=macdLine[i];
+  sigLine[fv+sig-1]=s/sig;
+  const k=2/(sig+1);
+  for(let i=fv+sig;i<macdLine.length;i++)
+    sigLine[i]=macdLine[i]*k+sigLine[i-1]*(1-k);
+  const hist=macdLine.map((v,i)=>isNaN(v)||isNaN(sigLine[i])?NaN:v-sigLine[i]);
+  return{macd:macdLine,signal:sigLine,hist};
+}
+function atr14(highs,lows,closes){
+  const tr=closes.map((_,i)=>{
+    if(i===0)return highs[i]-lows[i];
+    return Math.max(highs[i]-lows[i],Math.abs(highs[i]-closes[i-1]),Math.abs(lows[i]-closes[i-1]));
+  });
+  const res=new Array(closes.length).fill(NaN);
+  if(tr.length<14)return res;
+  let s=0;for(let i=0;i<14;i++)s+=tr[i];
+  res[13]=s/14;
+  for(let i=14;i<tr.length;i++)res[i]=(res[i-1]*13+tr[i])/14;
+  return res;
+}
+function rollingMean(arr,len){
+  return arr.map((_,i)=>{
+    if(i<len-1)return NaN;
+    let s=0;for(let k=i-len+1;k<=i;k++)s+=arr[k];return s/len;
+  });
+}
+function findSwingHighs(arr,lb=3){
+  const res=[];
+  for(let i=lb;i<arr.length-lb;i++){
+    let ok=true;
+    for(let j=i-lb;j<=i+lb;j++)if(j!==i&&arr[j]>=arr[i]){ok=false;break;}
+    if(ok)res.push(i);
+  }
+  return res;
+}
+function findSwingLows(arr,lb=3){
+  const res=[];
+  for(let i=lb;i<arr.length-lb;i++){
+    let ok=true;
+    for(let j=i-lb;j<=i+lb;j++)if(j!==i&&arr[j]<=arr[i]){ok=false;break;}
+    if(ok)res.push(i);
+  }
+  return res;
+}
+
+// ═══════════════════════════════════════════════════
+// PATTERN DETECTION
+// ═══════════════════════════════════════════════════
+
+// 1-2-3 Reversal
+function detect123(rows,atr){
+  const n=rows.length;
+  if(n<25)return null;
+  const H=rows.map(r=>r.high),L=rows.map(r=>r.low),C=rows.map(r=>r.close);
+  const price=C[n-1],minMove=atr*1.5;
+  const lb=Math.min(n-4,45);
+  const sH=findSwingHighs(H.slice(n-lb),3).map(i=>i+(n-lb));
+  const sL=findSwingLows(L.slice(n-lb),3).map(i=>i+(n-lb));
+
+  // Bullish 1-2-3
+  for(let li=0;li<sL.length-1;li++){
+    const p1i=sL[li],p1=L[p1i];
+    let p2i=-1,p2=-Infinity;
+    for(const hi of sH){if(hi>p1i&&H[hi]>p2){p2i=hi;p2=H[hi];}}
+    if(p2i<0||p2-p1<minMove)continue;
+    for(let lj=li+1;lj<sL.length;lj++){
+      const p3i=sL[lj],p3=L[p3i];
+      if(p3i<=p2i)continue;
+      if(p3<=p1||p3>=p2)continue;
+      if(n-1-p3i>12)continue;
+      const brk=p2;
+      const near=price>=brk*0.996&&price<=brk*1.02;
+      const out=C[n-1]>brk&&C[n-2]>brk;
+      if(near||out)return{pattern:"1-2-3 REVERSAL",patternDir:"BUY",breakLevel:brk,
+        confirmed:out,p1,p2,p3,strength:((p2-p1)/p1*100).toFixed(2)};
+    }
+  }
+  // Bearish 1-2-3
+  for(let hi=0;hi<sH.length-1;hi++){
+    const p1i=sH[hi],p1=H[p1i];
+    let p2i=-1,p2=Infinity;
+    for(const li of sL){if(li>p1i&&L[li]<p2){p2i=li;p2=L[li];}}
+    if(p2i<0||p1-p2<minMove)continue;
+    for(let hj=hi+1;hj<sH.length;hj++){
+      const p3i=sH[hj],p3=H[p3i];
+      if(p3i<=p2i)continue;
+      if(p3>=p1||p3<=p2)continue;
+      if(n-1-p3i>12)continue;
+      const brk=p2;
+      const near=price<=brk*1.004&&price>=brk*0.98;
+      const out=C[n-1]<brk&&C[n-2]<brk;
+      if(near||out)return{pattern:"1-2-3 REVERSAL",patternDir:"SELL",breakLevel:brk,
+        confirmed:out,p1,p2,p3,strength:((p1-p2)/p1*100).toFixed(2)};
+    }
+  }
+  return null;
+}
+
+// Cup and Handle
+function detectCupHandle(rows,atr){
+  const n=rows.length;
+  if(n<50)return null;
+  const H=rows.map(r=>r.high),L=rows.map(r=>r.low),C=rows.map(r=>r.close);
+  const price=C[n-1];
+  const lb=Math.min(60,n-8);
+  const st=n-lb;
+
+  // Left rim: highest in first third
+  let lrIdx=st;
+  const t1=st+Math.floor(lb/3);
+  for(let i=st;i<t1;i++)if(H[i]>H[lrIdx])lrIdx=i;
+  const lRim=H[lrIdx];
+
+  // Cup bottom: lowest in middle third
+  const t2=st+Math.floor(2*lb/3);
+  let cbIdx=t1;
+  for(let i=t1;i<t2;i++)if(L[i]<L[cbIdx])cbIdx=i;
+  const cupBot=L[cbIdx];
+  const depth=(lRim-cupBot)/lRim*100;
+  if(depth<5||depth>40)return null;
+
+  // Right rim: highest in last third (before handle)
+  let rrIdx=t2;
+  for(let i=t2;i<n-3;i++)if(H[i]>H[rrIdx])rrIdx=i;
+  const rRim=H[rrIdx];
+  if(Math.abs(rRim-lRim)/lRim>0.04)return null;   // rims must match
+
+  // Handle: remaining candles
+  const hSt=rrIdx+1;
+  if(n-hSt<2||n-hSt>14)return null;
+  const hHi=Math.max(...H.slice(hSt,n));
+  const hLo=Math.min(...L.slice(hSt,n));
+  const retrace=(rRim-hLo)/(rRim-cupBot)*100;
+  if(retrace>55)return null;
+
+  const brk=Math.max(lRim,rRim);
+  const near=price>=brk*0.996&&price<=brk*1.025;
+  const out=C[n-1]>brk&&C[n-2]>brk;
+  if(near||out)return{pattern:"CUP & HANDLE",patternDir:"BUY",breakLevel:brk,
+    confirmed:out,cupBot,leftRim:lRim,rightRim:rRim,strength:depth.toFixed(2)};
+  return null;
+}
+
+// Broadening Formation (Megaphone)
+function detectBroadening(rows){
+  const n=rows.length;
+  if(n<25)return null;
+  const H=rows.map(r=>r.high),L=rows.map(r=>r.low),C=rows.map(r=>r.close);
+  const price=C[n-1];
+  const lb=Math.min(35,n-3);
+  const sH=findSwingHighs(H.slice(n-lb),2).map(i=>i+(n-lb));
+  const sL=findSwingLows(L.slice(n-lb),2).map(i=>i+(n-lb));
+  if(sH.length<3||sL.length<3)return null;
+
+  const h1=H[sH[sH.length-3]],h2=H[sH[sH.length-2]],h3=H[sH[sH.length-1]];
+  const l1=L[sL[sL.length-3]],l2=L[sL[sL.length-2]],l3=L[sL[sL.length-1]];
+  if(!(h1<h2&&h2<h3))return null;
+  if(!(l1>l2&&l2>l3))return null;
+
+  const range=h3-l3;
+  if(range<=0)return null;
+  const pos=(price-l3)/range;
+
+  if(pos>=0.78)return{pattern:"BROADENING",patternDir:"SELL",breakLevel:h3,
+    confirmed:price>=h3,upperLine:h3,lowerLine:l3,strength:(range/price*100).toFixed(2)};
+  if(pos<=0.22)return{pattern:"BROADENING",patternDir:"BUY",breakLevel:l3,
+    confirmed:price<=l3,upperLine:h3,lowerLine:l3,strength:(range/price*100).toFixed(2)};
+  return null;
+}
+
+// Ascending / Descending Wedge
+function detectWedge(rows){
+  const n=rows.length;
+  if(n<22)return null;
+  const H=rows.map(r=>r.high),L=rows.map(r=>r.low),C=rows.map(r=>r.close);
+  const price=C[n-1];
+  const lb=Math.min(28,n-3);
+  const sH=findSwingHighs(H.slice(n-lb),2).map(i=>i+(n-lb));
+  const sL=findSwingLows(L.slice(n-lb),2).map(i=>i+(n-lb));
+  if(sH.length<2||sL.length<2)return null;
+
+  const h1=H[sH[sH.length-2]],h2=H[sH[sH.length-1]];
+  const l1=L[sL[sL.length-2]],l2=L[sL[sL.length-1]];
+  const hiSlope=h2-h1,loSlope=l2-l1;
+
+  // Ascending wedge (bearish): both slopes up, support rising faster
+  if(hiSlope>0&&loSlope>0&&loSlope>hiSlope*1.1){
+    const near=Math.abs(price-l2)/l2<0.012;
+    const brk=C[n-1]<l2&&C[n-2]>=l2;
+    if(near||brk)return{pattern:"ASC WEDGE",patternDir:"SELL",breakLevel:l2,
+      confirmed:brk,resistHigh:h2,supportLow:l2,strength:(Math.abs(hiSlope)/h1*100).toFixed(2)};
+  }
+  // Descending wedge (bullish): both slopes down, resistance falling faster
+  if(hiSlope<0&&loSlope<0&&Math.abs(hiSlope)>Math.abs(loSlope)*1.1){
+    const near=Math.abs(price-h2)/h2<0.012;
+    const brk=C[n-1]>h2&&C[n-2]<=h2;
+    if(near||brk)return{pattern:"DESC WEDGE",patternDir:"BUY",breakLevel:h2,
+      confirmed:brk,resistHigh:h2,supportLow:l2,strength:(Math.abs(loSlope)/l1*100).toFixed(2)};
+  }
+  return null;
+}
+
+// Bump-and-Run Reversal
+function detectBumpRun(rows,atr){
+  const n=rows.length;
+  if(n<35)return null;
+  const H=rows.map(r=>r.high),L=rows.map(r=>r.low),C=rows.map(r=>r.close);
+  const price=C[n-1];
+  const lb=Math.min(45,n-3);
+  const st=n-lb;
+  const t1=st+Math.floor(lb/3),t2=st+Math.floor(2*lb/3);
+
+  // Lead-in slope (gradual)
+  const leadSlope=(C[t1]-C[st])/(t1-st);
+  const leadAngle=Math.abs(leadSlope/C[st]*100);
+  if(leadAngle>1.5)return null;   // too steep for lead-in
+
+  // Bump: extreme move in middle third
+  const bumpHi=Math.max(...H.slice(t1,t2));
+  const bumpLo=Math.min(...L.slice(t1,t2));
+  const atrPct=(atr/price)*100;
+  const bumpUpMove=(bumpHi-C[t1])/C[t1]*100;
+  const bumpDnMove=(C[t1]-bumpLo)/C[t1]*100;
+
+  // Run phase: returning to lead-in trendline
+  const trendAtEnd=C[st]+leadSlope*(n-1-st);
+
+  if(bumpUpMove>atrPct*3){   // upward bump → bearish reversal
+    const returning=price<=trendAtEnd*1.03;
+    if(returning)return{pattern:"BUMP & RUN",patternDir:"SELL",breakLevel:trendAtEnd,
+      confirmed:price<trendAtEnd,bumpLevel:bumpHi,strength:bumpUpMove.toFixed(2)};
+  }
+  if(bumpDnMove>atrPct*3){   // downward bump → bullish reversal
+    const returning=price>=trendAtEnd*0.97;
+    if(returning)return{pattern:"BUMP & RUN",patternDir:"BUY",breakLevel:trendAtEnd,
+      confirmed:price>trendAtEnd,bumpLevel:bumpLo,strength:bumpDnMove.toFixed(2)};
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════════
+// MAIN EVALUATE — Primary: EMA5 × EMA200 + MACD(12,26,9)
+// ═══════════════════════════════════════════════════
+function evaluate(rows){
+  const C=rows.map(r=>r.close),H=rows.map(r=>r.high);
+  const L=rows.map(r=>r.low),V=rows.map(r=>r.vol);
+  const n=rows.length-1;
+
+  // ── INDICATORS ──
+  const e5arr  =ema(C,5);
+  const e200arr=ema(C,200);
+  const e50arr =ema(C,50);
+  const macdD  =calcMACD(C,12,26,9);
+  const bb     =bbands(C,BB_LEN,BB_MULT);
+  const atrArr =atr14(H,L,C);
+  const rsiArr =calcRSI(C,14);
+  const avgVol =rollingMean(V,20);
+
+  // Need at least n-3 lookback valid
+  if(n<4)return null;
+  const mustHave=[e5arr[n],e5arr[n-1],e200arr[n],e200arr[n-1],
+                  macdD.macd[n],macdD.signal[n],macdD.hist[n],
+                  atrArr[n],rsiArr[n]];
+  if(mustHave.some(v=>isNaN(v)||v==null))return null;
+
+  const price =C[n];
+  const atr   =atrArr[n];
+  if(price<=0||atr<=0)return null;
+  const atrPct=(atr/price)*100;
+  if(atrPct<MIN_ATR_PCT)return null;
+
+  // EMA5 and EMA200
+  const e5now =e5arr[n],  e5p1=e5arr[n-1], e5p3=e5arr[n-3]||e5p1;
+  const e200now=e200arr[n],e200p1=e200arr[n-1];
+  const e50=e50arr[n];
+  const bb_up=bb.upper[n],bb_lo=bb.lower[n],bb_mid=bb.mid[n];
+
+  // MACD(12,26,9)
+  const macdNow =macdD.macd[n],   macdP1=macdD.macd[n-1];
+  const sigNow  =macdD.signal[n], sigP1 =macdD.signal[n-1];
+  const histNow =macdD.hist[n],   histP1=macdD.hist[n-1];
+
+  // RSI
+  const rsiNow=rsiArr[n],rsiP1=rsiArr[n-1];
+
+  // Volume
+  const vol=V[n],av=avgVol[n]||1;
+  const volRatio=vol/av;
+  const volSpike=volRatio>=1.5;
+  const volMod  =volRatio>=1.2;
+
+  // ── EMA5 × EMA200 cross conditions ──
+  // Golden cross: EMA5 was ≤ EMA200, now crossed above
+  const emaCrossUp=e5p1<=e200p1&&e5now>e200now;
+  // Death cross: EMA5 was ≥ EMA200, now crossed below
+  const emaCrossDn=e5p1>=e200p1&&e5now<e200now;
+  // Fresh cross within last 3 bars (allows entry on same candle or 1-2 bars after)
+  const freshUp=e5p3<=e200arr[n-3]&&e5now>e200now;
+  const freshDn=e5p3>=e200arr[n-3]&&e5now<e200now;
+  // EMA5 vs EMA200 gap %
+  const emaGapPct=pctDiff(e5now,e200now);
+  const absEmaGap=Math.abs(emaGapPct);
+
+  // ── MACD(12,26,9) conditions ──
+  const macdBull  =macdNow>sigNow;          // MACD line above signal
+  const macdBear  =macdNow<sigNow;          // MACD line below signal
+  const macdXUp   =macdP1<=sigP1&&macdNow>sigNow;   // MACD just crossed up
+  const macdXDn   =macdP1>=sigP1&&macdNow<sigNow;   // MACD just crossed down
+  const histPos   =histNow>0;               // histogram positive
+  const histNeg   =histNow<0;              // histogram negative
+  const histRising=histNow>histP1;         // momentum increasing
+  const histFall  =histNow<histP1;         // momentum decreasing
+
+  // ── RSI alignment (secondary filter) ──
+  const rsiBull=rsiNow>50&&rsiNow<78;
+  const rsiBear=rsiNow<50&&rsiNow>22;
+  const rsiXUp =rsiP1<50&&rsiNow>=50;
+  const rsiXDn =rsiP1>50&&rsiNow<=50;
+
+  // ── Candle quality (anti-wick-fakeout) ──
+  const body=Math.abs(C[n]-rows[n].open),candleRange=H[n]-L[n];
+  const qualityCandle=candleRange>0&&(body/candleRange)>=0.45;
+
+  // ── EMA50 trend bias ──
+  const aboveE50=!isNaN(e50)&&price>e50;
+  const belowE50=!isNaN(e50)&&price<e50;
+
+  // ── Levels function ──
+  function levels(dir){
+    let sl,tp1,tp2;
+    if(dir==="BUY"){sl=price-atr*1.5;tp1=price+atr*2;tp2=price+atr*3;}
+    else           {sl=price+atr*1.5;tp1=price-atr*2;tp2=price-atr*3;}
+    const slP =Math.round(Math.abs(pctDiff(sl,price))*1000)/1000;
+    const tp1P=Math.round(Math.abs(pctDiff(tp1,price))*1000)/1000;
+    const tp2P=Math.round(Math.abs(pctDiff(tp2,price))*1000)/1000;
+    const rr  =slP>0?Math.round(tp2P/slP*100)/100:0;
+    return{sl,tp1,tp2,sl_p:slP,tp1_p:tp1P,tp2_p:tp2P,rr};
+  }
+
+  // ── Confidence scorer ──
+  // EMA cross + MACD together = PRIMARY (high weight)
+  // RSI/volume/quality = SECONDARY
+  function conf(dir,base){
+    let s=base;
+    // MACD (primary — highest weights)
+    if(dir==="BUY"){
+      if(macdXUp)       s+=22; // MACD cross just happened = strongest confirmation
+      else if(macdBull) s+=14; // MACD already above signal
+      if(histPos&&histRising) s+=10; // histogram positive and growing
+      else if(histPos)        s+=5;
+      // RSI
+      if(rsiXUp)s+=8;else if(rsiBull)s+=5;
+      // Volume
+      if(volSpike)s+=15;else if(volMod)s+=6;
+      // Extra
+      if(qualityCandle)s+=6;
+      if(aboveE50)s+=5;
+    }else{
+      if(macdXDn)        s+=22;
+      else if(macdBear)  s+=14;
+      if(histNeg&&histFall)s+=10;
+      else if(histNeg)     s+=5;
+      if(rsiXDn)s+=8;else if(rsiBear)s+=5;
+      if(volSpike)s+=15;else if(volMod)s+=6;
+      if(qualityCandle)s+=6;
+      if(belowE50)s+=5;
+    }
+    return Math.min(s,100);
+  }
+
+  // ── Signal builder ──
+  function mkSig(type,dir,pat,patData){
+    const lv=levels(dir);
+    if(lv.tp2_p<MIN_TP_PCT)return null;
+    const baseScore=type==="CROSSOVER"?48:type==="NEAR CROSS"?26:(patData&&patData.confirmed?50:36);
+    const c=conf(dir,baseScore);
+    if(c<MIN_CONF)return null;
+    return{
+      type,signal:dir,pattern:pat||null,patternData:patData||null,
+      confidence:c,...lv,
+      price,
+      ema5:e5now,ema200:e200now,ema_gap_pct:Math.round(emaGapPct*10000)/10000,
+      bb_mid,bb_up,bb_lo,
+      macd:Math.round(macdNow*1e7)/1e7,
+      macd_sig:Math.round(sigNow*1e7)/1e7,
+      macd_hist:Math.round(histNow*1e7)/1e7,
+      macd_bull:macdBull,macd_cross_up:macdXUp,macd_cross_dn:macdXDn,
+      atr,atr_pct:Math.round(atrPct*1000)/1000,
+      vol_spike:volSpike,vol_ratio:Math.round(volRatio*100)/100,
+      rsi:Math.round(rsiNow*10)/10,
+      ema50:e50,above_e50:aboveE50,below_e50:belowE50,
+      bull_trend:e5now>e200now,bear_trend:e5now<e200now
+    };
+  }
+
+  // ════════════════════════════════════════════════
+  // SIGNAL 1 — EMA5 × EMA200 CROSSOVER (PRIMARY)
+  //   Require: fresh EMA cross + MACD confirms direction
+  //   Anti-false-breakout: volume + candle quality
+  // ════════════════════════════════════════════════
+  const emaCrossBuy =(emaCrossUp||freshUp)&&macdBull&&(volSpike||volMod)&&qualityCandle;
+  const emaCrossSell=(emaCrossDn||freshDn)&&macdBear&&(volSpike||volMod)&&qualityCandle;
+
+  if(emaCrossBuy||emaCrossSell){
+    const dir=emaCrossBuy?"BUY":"SELL";
+    const sig=mkSig("CROSSOVER",dir,null,null);
+    if(sig)return sig;
+  }
+
+  // ════════════════════════════════════════════════
+  // SIGNAL 2 — NEAR CROSS (watch: EMA5 approaching EMA200)
+  //   EMA gap < 0.5% AND MACD histogram moving in signal direction
+  // ════════════════════════════════════════════════
+  if(absEmaGap<0.5){
+    const apUp=e5now>e5p1&&e5now<e200now;  // EMA5 rising toward EMA200 from below
+    const apDn=e5now<e5p1&&e5now>e200now;  // EMA5 falling toward EMA200 from above
+    // MACD histogram must support the direction
+    const macdSupBuy =(apUp&&(histRising||macdBull));
+    const macdSupSell=(apDn&&(histFall||macdBear));
+    if((apUp&&macdSupBuy)||(apDn&&macdSupSell)){
+      const dir=apUp?"BUY":"SELL";
+      const sig=mkSig("NEAR CROSS",dir,null,null);
+      if(sig)return sig;
+    }
+  }
+
+  // ════════════════════════════════════════════════
+  // SIGNAL 3 — ADVANCED CHART PATTERNS
+  //   Pattern detection runs only when no EMA/MACD cross found
+  //   MACD must agree with pattern direction for emission
+  // ════════════════════════════════════════════════
+  const patChecks=[
+    ()=>detect123(rows,atr),
+    ()=>detectCupHandle(rows,atr),
+    ()=>detectBroadening(rows),
+    ()=>detectWedge(rows),
+    ()=>detectBumpRun(rows,atr)
+  ];
+  for(const fn of patChecks){
+    const p=fn();
+    if(!p)continue;
+    // Pattern direction must agree with MACD — prevents false-breakout patterns
+    const macdAgrees=(p.patternDir==="BUY"?macdBull:macdBear);
+    if(!macdAgrees)continue;
+    const sig=mkSig("PATTERN",p.patternDir,p.pattern,p);
+    if(sig)return sig;
+  }
+
+  return null;
+}
+
+// ═══════════════════════════════════════════════════
+// SCAN ENGINE
+// ═══════════════════════════════════════════════════
+async function runScan(){
+  const tf=document.getElementById("tf-sel").value;
+  scanAborted=false;
+  allSignals=[];
+
+  document.getElementById("dot").className="status-dot scanning";
+  document.getElementById("status-txt").textContent="Fetching pairs…";
+  document.getElementById("scan-btn").style.display="none";
+  document.getElementById("stop-btn").style.display="inline-block";
+  document.getElementById("s-total").textContent="…";
+  setProgress(0);
+
+  log("Fetching symbol list from Delta India…");
+  let symbols;
+  try{symbols=await getSymbols();}
+  catch(e){log("❌ Failed to fetch symbols: "+e);stopScan();return;}
+
+  if(scanAborted)return;
+  log(`Got ${symbols.length} perpetual pairs. Starting scan on ${tf}…`);
+
+  const total=symbols.length;
+  let done=0,found=0;
+  const newCache={};
+
+  for(let i=0;i<symbols.length;i+=CONCURRENCY){
+    if(scanAborted)break;
+    const batch=symbols.slice(i,i+CONCURRENCY);
+    await Promise.all(batch.map(async sym=>{
+      if(scanAborted)return;
+      const rows=await fetchCandles(sym,tf);
+      done++;
+      setProgress(Math.round(done/total*100));
+      document.getElementById("scan-info").textContent=
+        `Scanning ${total} pairs on ${tf.toUpperCase()} — ${done}/${total}  |  Signals: ${found}`;
+      if(!rows)return;
+      const sig=evaluate(rows);
+      if(!sig)return;
+      found++;
+
+      // Persistence: track consecutive scan count
+      const cacheKey=`${sym}_${sig.type}_${sig.signal}${sig.pattern?'_'+sig.pattern:''}`;
+      const prev=signalCache[cacheKey];
+      const count=prev?prev.count+1:1;
+      newCache[cacheKey]={count,sig};
+
+      const isNew=!signalCache[cacheKey];
+      allSignals.push({sym,s:sig,isNew,count});
+      allSignals.sort((a,b)=>b.s.confidence-a.s.confidence);
+      updateStats();
+      renderTable();
+    }));
+  }
+
+  signalCache=newCache;
+  const now=new Date().toLocaleTimeString();
+  document.getElementById("s-total").textContent=total;
+  document.getElementById("s-time").textContent=now;
+  setProgress(100);
+  document.getElementById("dot").className="status-dot idle";
+  document.getElementById("status-txt").textContent="Idle";
+  document.getElementById("scan-btn").style.display="inline-block";
+  document.getElementById("stop-btn").style.display="none";
+  document.getElementById("scan-info").textContent=
+    `✅ Scan complete — ${total} pairs | ${found} signals | ${now} | TF: ${tf.toUpperCase()}`;
+  log(`✅ Done. ${found} signals from ${total} pairs on ${tf}`);
+
+  const loopMins=parseInt(document.getElementById("loop-sel").value);
+  if(loopMins>0&&!scanAborted){
+    document.getElementById("status-txt").textContent=`Next in ${loopMins}m`;
+    loopTimer=setTimeout(()=>runScan(),loopMins*60*1000);
+  }
+}
+
+function startScan(){
+  if(loopTimer){clearTimeout(loopTimer);loopTimer=null;}
+  runScan();
+}
+function stopScan(){
+  scanAborted=true;
+  if(loopTimer){clearTimeout(loopTimer);loopTimer=null;}
+  document.getElementById("dot").className="status-dot idle";
+  document.getElementById("status-txt").textContent="Stopped";
+  document.getElementById("scan-btn").style.display="inline-block";
+  document.getElementById("stop-btn").style.display="none";
+  log("⏹ Scan stopped.");
+}
+function setProgress(pct){document.getElementById("progress-bar").style.width=pct+"%";}
+
+// ═══════════════════════════════════════════════════
+// STATS
+// ═══════════════════════════════════════════════════
+function updateStats(){
+  const cross=allSignals.filter(r=>r.s.type==="CROSSOVER");
+  const near =allSignals.filter(r=>r.s.type==="NEAR CROSS");
+  const patt =allSignals.filter(r=>r.s.type==="PATTERN");
+  const hconf=allSignals.filter(r=>r.s.confidence>=75);
+  document.getElementById("s-cbuy").textContent =cross.filter(r=>r.s.signal==="BUY").length;
+  document.getElementById("s-csell").textContent=cross.filter(r=>r.s.signal==="SELL").length;
+  document.getElementById("s-patt").textContent =patt.length;
+  document.getElementById("s-hconf").textContent=hconf.length;
+  document.getElementById("s-near").textContent =near.length;
+  document.getElementById("cnt-all").textContent  =allSignals.length;
+  document.getElementById("cnt-cross").textContent=cross.length;
+  document.getElementById("cnt-patt").textContent =patt.length;
+  document.getElementById("cnt-hconf").textContent=hconf.length;
+  document.getElementById("cnt-near").textContent =near.length;
+}
+
+// ═══════════════════════════════════════════════════
+// SORT / FILTER / TAB
+// ═══════════════════════════════════════════════════
+function sortBy(key){
+  if(sortKey===key)sortDir*=-1;else{sortKey=key;sortDir=-1;}
+  renderTable();
+}
+function switchTab(tab){
+  activeTab=tab;
+  ["all","cross","patt","hconf","near"].forEach(t=>{
+    document.getElementById("tab-"+t).className="tab"+(t===tab?" active":"");
+  });
+  renderTable();
+}
+function getFiltered(){
+  const sym  =document.getElementById("sym-filter").value.trim().toUpperCase();
+  const sig  =document.getElementById("sig-filter").value;
+  const type =document.getElementById("type-filter").value;
+  const patt =document.getElementById("patt-filter").value;
+  const minC =parseInt(document.getElementById("conf-filter").value)||0;
+  const volOk=document.getElementById("vol-filter").checked;
+  return allSignals.filter(r=>{
+    if(activeTab==="cross" &&r.s.type!=="CROSSOVER")return false;
+    if(activeTab==="near"  &&r.s.type!=="NEAR CROSS")return false;
+    if(activeTab==="patt"  &&r.s.type!=="PATTERN")return false;
+    if(activeTab==="hconf" &&r.s.confidence<75)return false;
+    if(sym&&!r.sym.includes(sym))return false;
+    if(sig!=="ALL"&&r.s.signal!==sig)return false;
+    if(type!=="ALL"&&r.s.type!==type)return false;
+    if(patt!=="ALL"&&r.s.pattern!==patt)return false;
+    if(r.s.confidence<minC)return false;
+    if(volOk&&!r.s.vol_spike)return false;
+    return true;
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// RENDER TABLE
+// ═══════════════════════════════════════════════════
+function confClass(c){return c>=75?"conf-high":c>=60?"conf-med":"conf-low";}
+function confColor(c){return c>=75?"var(--green)":c>=60?"var(--yellow)":"var(--orange)";}
+
+function renderTable(){
+  updateStats();
+  const filtered=getFiltered();
+  filtered.sort((a,b)=>{
+    let va=a.s[sortKey]??a[sortKey],vb=b.s[sortKey]??b[sortKey];
+    if(sortKey==="sym")return sortDir*(fmtSym(a.sym).localeCompare(fmtSym(b.sym)));
+    if(typeof va==="string")return sortDir*String(va).localeCompare(String(vb));
+    return sortDir*(parseFloat(va)-parseFloat(vb));
+  });
+  const tbody=document.getElementById("sig-body");
+  if(!filtered.length){
+    tbody.innerHTML=`<tr><td colspan="14" class="empty">${
+      allSignals.length?"No signals match current filters.":"No scan run yet. Click ▶ SCAN NOW."
+    }</td></tr>`;
+    return;
+  }
+  tbody.innerHTML=filtered.map((r,i)=>{
+    const s=r.s,sym=fmtSym(r.sym);
+    const isBuy=s.signal==="BUY",isCross=s.type==="CROSSOVER",isPatt=s.type==="PATTERN";
+    const sigBadge=isBuy?`<span class="badge buy">▲ BUY</span>`:`<span class="badge sell">▼ SELL</span>`;
+
+    // Type badge
+    let typeBadge;
+    if(isCross) typeBadge=`<span class="badge cross">🔥 CROSS</span>`;
+    else if(s.type==="NEAR CROSS") typeBadge=`<span class="badge near">👀 NEAR</span>`;
+    else typeBadge=`<span class="badge patt">📐 ${s.pattern||"PATTERN"}</span>`;
+
+    // Confirmation badge
+    const confBadge=r.count>=3?`<span class="badge confirmed-b">✓ ${r.count}×</span>`:"";
+
+    // Confidence
+    const cc=confClass(s.confidence);
+    const confEl=`<span class="${cc}" style="font-weight:700">${s.confidence}%</span>`;
+
+    // RSI
+    let rsiCls="";
+    if(s.rsi>=70)rsiCls="rsi-ob";
+    else if(s.rsi<=30)rsiCls="rsi-os";
+    else if(s.rsi>50)rsiCls="rsi-bull";
+    else rsiCls="rsi-bear";
+    const rsiEl=`<span class="${rsiCls}">${s.rsi.toFixed(1)}</span>`;
+
+    // Trend
+    const trendEl=s.bull_trend?`<span class="trend-bull">▲ Bull</span>`:
+                  s.bear_trend?`<span class="trend-bear">▼ Bear</span>`:
+                  `<span style="color:var(--muted);font-size:10px">─ Side</span>`;
+
+    // Volume
+    const volEl=s.vol_spike?`<span class="vol-ok">✔ ${s.vol_ratio.toFixed(1)}×</span>`:
+                             `<span class="vol-no">${s.vol_ratio.toFixed(1)}×</span>`;
+
+    const eg=s.ema_gap_pct||0;
+    const gapColor=eg>0?"color:var(--green)":"color:var(--red)";
+    // MACD indicator cell
+    const mHistColor=s.macd_hist>0?"color:var(--green)":"color:var(--red)";
+    const macdBadge=s.macd_cross_up?`<span style="color:var(--green);font-size:10px">▲XUP</span>`:
+                    s.macd_cross_dn?`<span style="color:var(--red);font-size:10px">▼XDN</span>`:
+                    s.macd_bull?`<span style="color:var(--green);font-size:10px">▲</span>`:
+                    `<span style="color:var(--red);font-size:10px">▼</span>`;
+    const newCls=r.isNew?" new-row":"";
+
+    return `<tr class="${newCls}" data-idx="${i}">
+      <td style="color:var(--muted)">${i+1}&nbsp;<b style="color:var(--text)">${sym}</b></td>
+      <td><b>${fmtPrice(s.price)}</b></td>
+      <td>${sigBadge}</td>
+      <td>${typeBadge} ${confBadge}</td>
+      <td>${confEl}</td>
+      <td>${rsiEl}&nbsp;${macdBadge}</td>
+      <td>${trendEl}</td>
+      <td>${volEl}</td>
+      <td style="${gapColor};font-weight:600">${eg>0?"+":""}${eg.toFixed(3)}%</td>
+      <td>${s.atr_pct.toFixed(3)}%</td>
+      <td style="color:var(--green)">+${s.tp2_p}%</td>
+      <td style="color:var(--red)">-${s.sl_p}%</td>
+      <td style="color:var(--accent)">1:${s.rr}</td>
+      <td><button onclick="showDetail(${i})" style="padding:2px 7px;font-size:11px">📋</button></td>
+    </tr>`;
+  }).join("");
+}
+
+// ═══════════════════════════════════════════════════
+// DETAIL PANEL
+// ═══════════════════════════════════════════════════
+function showDetail(idx){
+  const filtered=getFiltered();
+  filtered.sort((a,b)=>{
+    let va=a.s[sortKey]??a[sortKey],vb=b.s[sortKey]??b[sortKey];
+    if(sortKey==="sym")return sortDir*(fmtSym(a.sym).localeCompare(fmtSym(b.sym)));
+    if(typeof va==="string")return sortDir*String(va).localeCompare(String(vb));
+    return sortDir*(parseFloat(va)-parseFloat(vb));
+  });
+  const r=filtered[idx];if(!r)return;
+  const s=r.s,sym=fmtSym(r.sym);
+  const isBuy=s.signal==="BUY",col=isBuy?"var(--green)":"var(--red)";
+  const tf=document.getElementById("tf-sel").value.toUpperCase();
+
+  document.getElementById("d-title").innerHTML=
+    `<span style="color:${col}">${sym}</span> &nbsp;·&nbsp; ${s.signal} &nbsp;·&nbsp;
+     <span style="color:${confColor(s.confidence)}">${s.confidence}% Confidence</span>`;
+
+  // Pattern info section
+  let patSection="";
+  if(s.patternData){
+    const p=s.patternData;
+    patSection=`
+    <div class="pattern-info">
+      <div class="pi-title">📐 ${p.pattern} ${p.confirmed?'<span style="color:var(--green);font-size:11px">✅ Confirmed Breakout</span>':'<span style="color:var(--yellow);font-size:11px">⚠ Approaching Level</span>'}</div>
+      <div class="pi-row"><span class="pi-k">Break Level</span><span>${fmtPrice(p.breakLevel)}</span></div>
+      <div class="pi-row"><span class="pi-k">Pattern Strength</span><span>${p.strength}%</span></div>
+      ${p.p1!==undefined?`<div class="pi-row"><span class="pi-k">Point 1 / 2 / 3</span><span>${fmtPrice(p.p1)} → ${fmtPrice(p.p2)} → ${fmtPrice(p.p3)}</span></div>`:""}
+      ${p.cupBot!==undefined?`<div class="pi-row"><span class="pi-k">Cup Bottom / Rim</span><span>${fmtPrice(p.cupBot)} / ${fmtPrice(Math.max(p.leftRim||0,p.rightRim||0))}</span></div>`:""}
+      ${p.upperLine!==undefined?`<div class="pi-row"><span class="pi-k">Upper / Lower Line</span><span>${fmtPrice(p.upperLine)} / ${fmtPrice(p.lowerLine)}</span></div>`:""}
+      ${p.bumpLevel!==undefined?`<div class="pi-row"><span class="pi-k">Bump Level / Trendline</span><span>${fmtPrice(p.bumpLevel)} / ${fmtPrice(p.breakLevel)}</span></div>`:""}
+    </div>`;
+  }
+
+  // Trade levels
+  const action=isBuy?"LONG / BUY":"SHORT / SELL";
+  const tradeLevels=`
+  <hr class="dl-divider"/>
+  <div class="trade-box">
+    <div class="trow"><span class="tk">ACTION</span><b style="color:${col}">${action}</b></div>
+    <div class="trow"><span class="tk">Entry</span><b>${fmtPrice(s.price)}</b></div>
+    <div class="trow"><span class="tk">Stop Loss</span>
+      <span style="color:var(--red)">${fmtPrice(s.sl)} &nbsp;(${isBuy?"-":"+"}${s.sl_p}% · 1.5×ATR)</span></div>
+    <div class="trow"><span class="tk">Target 1</span>
+      <span style="color:#86efac">${fmtPrice(s.tp1)} &nbsp;(${isBuy?"+":"-"}${s.tp1_p.toFixed(3)}% · 2×ATR)</span></div>
+    <div class="trow"><span class="tk">Target 2</span>
+      <span style="color:var(--green)">${fmtPrice(s.tp2)} &nbsp;(${isBuy?"+":"-"}${s.tp2_p.toFixed(3)}% · 3×ATR)</span></div>
+    <div class="trow"><span class="tk">R:R Ratio</span>
+      <b style="color:var(--accent)">1:${s.rr} &nbsp;|&nbsp; Risk max 2% capital</b></div>
+    ${r.count>=2?`<div class="trow"><span class="tk">Scan Confirmations</span><b style="color:var(--green)">✅ ${r.count} consecutive scans — HIGH CONFIDENCE</b></div>`:""}
+  </div>`;
+
+  // Signal quality checklist
+  const checks=[
+    [(isBuy?s.bull_trend:s.bear_trend),
+      isBuy?"✅ EMA5 ABOVE EMA200 (Golden Cross)":"✅ EMA5 BELOW EMA200 (Death Cross)",
+      isBuy?"⚪ EMA5 below EMA200 — counter-trend":"⚪ EMA5 above EMA200 — counter-trend"],
+    [(isBuy?s.macd_cross_up:s.macd_cross_dn),
+      "✅ MACD just crossed — fresh signal","⚪ MACD cross not on this bar"],
+    [(isBuy?s.macd_bull:!s.macd_bull),
+      isBuy?"✅ MACD line above Signal line":"✅ MACD line below Signal line",
+      isBuy?"⚪ MACD still below signal":"⚪ MACD still above signal"],
+    [s.vol_spike,"✅ Volume Spike ≥1.5× (strong conviction)","⚪ Volume below 1.5× avg"],
+    [(isBuy?s.rsi>50&&s.rsi<78:s.rsi<50&&s.rsi>22),
+      "✅ RSI momentum aligned","⚪ RSI not fully aligned"],
+    [(isBuy?s.above_e50:s.below_e50),
+      isBuy?"✅ Price above EMA50 (strong uptrend)":"✅ Price below EMA50 (strong downtrend)",
+      isBuy?"⚪ Price below EMA50":"⚪ Price above EMA50"],
+    [(s.patternData&&s.patternData.confirmed),"✅ Pattern breakout confirmed",""],
+  ].filter(([_,ok,bad])=>ok||bad);
+
+  const checklist=checks.map(([cond,ok,bad])=>
+    cond?`<div style="color:var(--green);font-size:11px">${ok}</div>`:
+    bad ?`<div style="color:var(--muted);font-size:11px">${bad}</div>`:""
+  ).join("");
+
+  const eg=s.ema_gap_pct||0;
+  const egColor=eg>0?"var(--green)":"var(--red)";
+  const macdHistColor=s.macd_hist>0?"var(--green)":"var(--red)";
+  const macdStatus=s.macd_cross_up?"🔺 MACD JUST CROSSED UP":
+                   s.macd_cross_dn?"🔻 MACD JUST CROSSED DOWN":
+                   s.macd_bull?"▲ MACD above Signal":"▼ MACD below Signal";
+  const macdStatusColor=s.macd_bull?"var(--green)":"var(--red)";
+
+  document.getElementById("d-content").innerHTML=`
+  <div style="background:#0d1a2e;border:1px solid rgba(59,130,246,.4);border-radius:8px;padding:10px;margin-bottom:10px">
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:600">PRIMARY SIGNALS</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:12px">
+      <div><span style="color:var(--muted)">EMA 5</span>&nbsp;<b>${fmtPrice(s.ema5)}</b></div>
+      <div><span style="color:var(--muted)">EMA 200</span>&nbsp;<b>${fmtPrice(s.ema200)}</b></div>
+      <div><span style="color:var(--muted)">EMA Gap</span>&nbsp;<b style="color:${egColor}">${eg>0?"+":""}${eg.toFixed(4)}%</b></div>
+      <div><span style="color:var(--muted)">Cross Status</span>&nbsp;<b style="color:${s.bull_trend?"var(--green)":"var(--red)"}">${s.bull_trend?"▲ EMA5 > EMA200":"▼ EMA5 < EMA200"}</b></div>
+    </div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:8px 0"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:12px">
+      <div><span style="color:var(--muted)">MACD(12,26)</span>&nbsp;<b style="color:${macdStatusColor}">${typeof s.macd==='number'?s.macd.toFixed(6):'—'}</b></div>
+      <div><span style="color:var(--muted)">Signal(9)</span>&nbsp;<b>${typeof s.macd_sig==='number'?s.macd_sig.toFixed(6):'—'}</b></div>
+      <div><span style="color:var(--muted)">Histogram</span>&nbsp;<b style="color:${macdHistColor}">${typeof s.macd_hist==='number'?s.macd_hist.toFixed(6):'—'}</b></div>
+      <div><span style="color:${macdStatusColor};font-weight:700">${macdStatus}</span></div>
+    </div>
+  </div>
+  <div class="dl-grid">
+    <div class="dl-row"><span class="k">Price</span><span class="v">${fmtPrice(s.price)}</span></div>
+    <div class="dl-row"><span class="k">BB Mid / Upper / Lower</span><span class="v" style="font-size:11px">${fmtPrice(s.bb_mid)} / ${fmtPrice(s.bb_up)} / ${fmtPrice(s.bb_lo)}</span></div>
+    <div class="dl-row"><span class="k">RSI(14)</span><span class="v" style="color:${s.rsi>70?"var(--red)":s.rsi<30?"var(--cyan)":s.rsi>50?"var(--green)":"var(--red)"}">${s.rsi.toFixed(1)}</span></div>
+    <div class="dl-row"><span class="k">EMA 50</span><span class="v" style="color:${s.above_e50?"var(--green)":"var(--red)"}">${fmtPrice(s.ema50)} ${s.above_e50?"▲ Above":"▼ Below"}</span></div>
+    <div class="dl-row"><span class="k">ATR(14)</span><span class="v">${fmtPrice(s.atr)} (${s.atr_pct.toFixed(3)}%)</span></div>
+    <div class="dl-row"><span class="k">Vol Ratio</span><span class="v" style="color:${s.vol_spike?"var(--green)":"var(--muted)"}">${s.vol_ratio.toFixed(2)}× avg ${s.vol_spike?"✅":""}</span></div>
+  </div>
+  ${patSection}
+  ${tradeLevels}
+  <hr class="dl-divider"/>
+  <div style="font-size:11px;margin-bottom:6px;color:var(--muted)">SIGNAL QUALITY CHECKS</div>
+  ${checklist}
+  <hr class="dl-divider"/>
+  <div style="font-size:11px;color:var(--muted);text-align:center">
+    TF: ${tf} &nbsp;·&nbsp; Scanned: ${new Date().toLocaleTimeString()}
+    &nbsp;·&nbsp; Confidence: <span style="color:${confColor(s.confidence)};font-weight:700">${s.confidence}%</span>
+  </div>`;
+
+  document.getElementById("detail-overlay").classList.add("open");
+}
+function closeDetail(){document.getElementById("detail-overlay").classList.remove("open");}
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDetail();});
+</script>
+</body>
+</html>
