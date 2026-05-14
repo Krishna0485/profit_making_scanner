@@ -91,6 +91,18 @@ td{padding:5px 7px;white-space:nowrap}
 .empty{text-align:center;padding:40px;color:var(--muted);font-size:13px}
 @keyframes newrow{0%{background:#1e3a5f}100%{background:transparent}}
 .new-row{animation:newrow 2s ease-out forwards}
+/* LIVE MODE */
+@keyframes livepulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(.95)}}
+.live-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(239,68,68,.15);
+  border:1px solid rgba(239,68,68,.5);border-radius:6px;padding:4px 10px;font-size:12px;
+  font-weight:700;color:var(--red);animation:livepulse 1.2s infinite}
+.live-badge .ld{width:7px;height:7px;border-radius:50%;background:var(--red);
+  animation:pulse .8s infinite}
+button.live-btn{background:rgba(239,68,68,.2);border-color:rgba(239,68,68,.6);
+  color:var(--red);font-weight:700}
+button.live-btn.active{background:var(--red);border-color:#b91c1c;color:#fff}
+.countdown-bar{height:3px;background:rgba(239,68,68,.3)}
+.countdown-fill{height:100%;background:var(--red);transition:width .9s linear}
 </style>
 </head>
 <body>
@@ -110,17 +122,20 @@ td{padding:5px 7px;white-space:nowrap}
     </select>
     <select id="loop-sel">
       <option value="0">One-shot</option>
+      <option value="1">Loop 1 min</option>
       <option value="5">Loop 5 min</option>
       <option value="15" selected>Loop 15 min</option>
       <option value="30">Loop 30 min</option>
       <option value="60">Loop 60 min</option>
     </select>
+    <button class="live-btn" id="live-btn" onclick="toggleLive()">⚡ LIVE</button>
     <button class="primary" id="scan-btn" onclick="startScan()">▶ SCAN NOW</button>
     <button class="stop" id="stop-btn" onclick="stopScan()" style="display:none">■ STOP</button>
   </div>
 </div>
 
 <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+<div class="countdown-bar" id="countdown-bar" style="display:none"><div class="countdown-fill" id="countdown-fill" style="width:100%"></div></div>
 <div id="scan-info">Ready — select timeframe and click ▶ SCAN NOW</div>
 
 <div class="statsrow" id="statsrow">
@@ -147,6 +162,7 @@ td{padding:5px 7px;white-space:nowrap}
   <select id="type-filter" onchange="renderTable()">
     <option value="ALL">All Types</option>
     <option value="CROSSOVER">Crossover</option>
+    <option value="RECENT CROSS">Recent Cross</option>
     <option value="NEAR CROSS">Near Cross</option>
     <option value="PATTERN">Patterns</option>
   </select>
@@ -159,6 +175,7 @@ td{padding:5px 7px;white-space:nowrap}
     <option value="ASC WEDGE">Asc Wedge</option>
     <option value="DESC WEDGE">Desc Wedge</option>
     <option value="BUMP & RUN">Bump &amp; Run</option>
+    <option value="TRENDLINE BRK">Trendline Break</option>
   </select>
   <label>Min Conf%:</label>
   <input type="range" id="conf-filter" min="0" max="90" step="5" value="0"
@@ -226,7 +243,7 @@ const MIN_TP_PCT   = 0.25;
 const NEAR_CROSS   = 0.20;   // tighter — EMA5 must be within 0.20% of EMA200
 const CANDLE_LIMIT = 280;  // need 200+ for reliable EMA200
 const CONCURRENCY  = 8;
-const MIN_CONF     = 45;   // global min confidence to emit any signal
+const MIN_CONF     = 40;   // floor — EMA+MACD cross always clears this
 
 const MINS_MAP = {"1m":1,"3m":3,"5m":5,"15m":15,"30m":30,"1h":60,"2h":120,"4h":240,"6h":360,"1d":1440};
 
@@ -240,6 +257,9 @@ let activeTab   = "all";
 let scanAborted = false;
 let loopTimer   = null;
 let signalCache = {};   // key -> {count, lastSig}
+let liveMode    = false;
+let liveCountTimer = null;
+let liveCountSecs  = 0;
 
 // ═══════════════════════════════════════════════════
 // UTILS
@@ -293,6 +313,31 @@ async function fetchCandles(symbol,resolution){
     })).filter(c=>!isNaN(c.close)&&c.close>0);
     rows.sort((a,b)=>a.time-b.time);
     return rows.length>=30?rows:null;
+  }catch(e){return null;}
+}
+
+// 4H EMA5×EMA200 cross gate — requires actual recent 4H cross, not just trend
+async function get4HBias(symbol){
+  try{
+    const rows=await fetchCandles(symbol,"4h");
+    if(!rows||rows.length<205)return null;
+    const C=rows.map(r=>r.close);
+    const e5arr=ema(C,5),e200arr=ema(C,200);
+    const n=rows.length-1;
+    if(isNaN(e5arr[n])||isNaN(e200arr[n]))return null;
+    // Use n-1 (last CLOSED 4H bar) — exclude current forming candle to avoid spike artifacts
+    const cn=n-1;
+    if(isNaN(e5arr[cn])||isNaN(e200arr[cn]))return null;
+    // Look back up to 20 × 4H bars (~80h / 3.3 days) for a real cross event
+    const rc=findRecentCross(e5arr,e200arr,cn,20);
+    // recentCross MUST exist — just being in trend is not enough
+    if(!rc)return null;
+    return{
+      bull:e5arr[cn]>e200arr[cn],
+      bear:e5arr[cn]<e200arr[cn],
+      recentCross:rc,          // always present
+      fresh:rc.barsAgo<=5     // "fresh" = within last 5 × 4H bars (~20h)
+    };
   }catch(e){return null;}
 }
 
@@ -595,6 +640,54 @@ function detectBumpRun(rows,atr){
   return null;
 }
 
+// Trendline Breakout / Breakdown
+// BUY:  descending resistance (lower highs) → price crosses above
+// SELL: ascending support (higher lows)     → price crosses below
+function detectTrendlineBreakout(rows){
+  const n=rows.length;
+  if(n<20)return null;
+  const H=rows.map(r=>r.high),L=rows.map(r=>r.low),C=rows.map(r=>r.close);
+  const price=C[n-1];
+  const lb=Math.min(50,n-3);
+
+  // ── BUY: Descending resistance trendline (lower highs) ──
+  const sH=findSwingHighs(H.slice(n-lb),2).map(i=>i+(n-lb));
+  if(sH.length>=2){
+    const p1i=sH[sH.length-2],p2i=sH[sH.length-1];
+    const p1h=H[p1i],p2h=H[p2i];
+    if(p2h<p1h&&p2i>p1i&&(n-1-p2i)<=20){   // descending + recent
+      const slope=(p2h-p1h)/(p2i-p1i);
+      const tlNow =p2h+slope*(n-1-p2i);
+      const tlPrev=p2h+slope*(n-2-p2i);
+      const brk=C[n-1]>tlNow&&C[n-2]<=tlPrev;                       // close crossed above
+      const near=!brk&&C[n-1]>tlNow*0.988&&C[n-1]<=tlNow*1.018&&C[n-1]>C[n-2];
+      if(brk||near)return{pattern:"TRENDLINE BRK",patternDir:"BUY",
+        breakLevel:tlNow,confirmed:brk,
+        upperLine:p1h,lowerLine:p2h,
+        strength:((p1h-p2h)/p1h*100).toFixed(2)};
+    }
+  }
+
+  // ── SELL: Ascending support trendline (higher lows) ──
+  const sL=findSwingLows(L.slice(n-lb),2).map(i=>i+(n-lb));
+  if(sL.length>=2){
+    const p1i=sL[sL.length-2],p2i=sL[sL.length-1];
+    const p1l=L[p1i],p2l=L[p2i];
+    if(p2l>p1l&&p2i>p1i&&(n-1-p2i)<=20){   // ascending + recent
+      const slope=(p2l-p1l)/(p2i-p1i);
+      const tlNow =p2l+slope*(n-1-p2i);
+      const tlPrev=p2l+slope*(n-2-p2i);
+      const brk=C[n-1]<tlNow&&C[n-2]>=tlPrev;                       // close crossed below
+      const near=!brk&&C[n-1]<tlNow*1.012&&C[n-1]>=tlNow*0.982&&C[n-1]<C[n-2];
+      if(brk||near)return{pattern:"TRENDLINE BRK",patternDir:"SELL",
+        breakLevel:tlNow,confirmed:brk,
+        upperLine:p2l,lowerLine:p1l,
+        strength:((p2l-p1l)/p1l*100).toFixed(2)};
+    }
+  }
+  return null;
+}
+
 // Scan for EMA5×EMA200 cross within last `maxLookback` candles
 // Returns {dir:'UP'|'DN', barsAgo:N} or null
 function findRecentCross(e5arr, e200arr, n, maxLookback=7){
@@ -775,17 +868,16 @@ function evaluate(rows){
 
   // ════════════════════════════════════════════════
   // SIGNAL 1 — EMA5 × EMA200 CROSSOVER (PRIMARY)
-  //   Looks back 7 candles so slow scans NEVER miss a cross
-  //   barsAgo=0-1 → CROSSOVER (fresh)
-  //   barsAgo=2-7 → RECENT CROSS (crossed but still valid)
-  //   MACD must confirm + volume + quality candle required
+  //   HARD GATE: EMA cross happened (within 7 bars) + MACD confirms direction
+  //   Volume, candle quality, RSI → confidence score ONLY, never block signal
+  //   barsAgo 0-1 = CROSSOVER (fresh), 2-7 = RECENT CROSS
   // ════════════════════════════════════════════════
   const rc=findRecentCross(e5arr,e200arr,n,7);
   if(rc){
     const dir=rc.dir==="UP"?"BUY":"SELL";
+    // Only two hard requirements: cross happened + MACD on same side
     const macdOk=dir==="BUY"?macdBull:macdBear;
-    if(macdOk&&(volSpike||volMod)&&qualityCandle){
-      // Fresh (0-1 bars) = CROSSOVER, older (2-7 bars) = RECENT CROSS
+    if(macdOk){
       const type=rc.barsAgo<=1?"CROSSOVER":"RECENT CROSS";
       const sig=mkSig(type,dir,null,null,rc.barsAgo);
       if(sig)return sig;
@@ -793,18 +885,15 @@ function evaluate(rows){
   }
 
   // ════════════════════════════════════════════════
-  // SIGNAL 2 — NEAR CROSS (watch: EMA5 approaching EMA200)
-  //   EMA gap < 0.5% AND MACD histogram moving in signal direction
+  // SIGNAL 2 — NEAR CROSS (EMA5 within 0.20% of EMA200, approaching)
+  //   HARD GATE: direction of approach only — no volume/quality gate
   // ════════════════════════════════════════════════
-  if(absEmaGap<0.5){
+  if(absEmaGap<NEAR_CROSS){
     const apUp=e5now>e5p1&&e5now<e200now;  // EMA5 rising toward EMA200 from below
     const apDn=e5now<e5p1&&e5now>e200now;  // EMA5 falling toward EMA200 from above
-    // MACD histogram must support the direction
-    const macdSupBuy =(apUp&&(histRising||macdBull));
-    const macdSupSell=(apDn&&(histFall||macdBear));
-    if((apUp&&macdSupBuy)||(apDn&&macdSupSell)){
+    if(apUp||apDn){
       const dir=apUp?"BUY":"SELL";
-      const sig=mkSig("NEAR CROSS",dir,null,null);
+      const sig=mkSig("NEAR CROSS",dir,null,null,0);
       if(sig)return sig;
     }
   }
@@ -819,7 +908,8 @@ function evaluate(rows){
     ()=>detectCupHandle(rows,atr),
     ()=>detectBroadening(rows),
     ()=>detectWedge(rows),
-    ()=>detectBumpRun(rows,atr)
+    ()=>detectBumpRun(rows,atr),
+    ()=>detectTrendlineBreakout(rows)
   ];
   for(const fn of patChecks){
     const p=fn();
@@ -855,7 +945,8 @@ async function runScan(){
   catch(e){log("❌ Failed to fetch symbols: "+e);stopScan();return;}
 
   if(scanAborted)return;
-  log(`Got ${symbols.length} perpetual pairs. Starting scan on ${tf}…`);
+  const is4HTF=tf==="4h";
+  log(`Got ${symbols.length} perpetual pairs. Starting MTF scan (4H + ${tf.toUpperCase()})…`);
 
   const total=symbols.length;
   let done=0,found=0;
@@ -866,14 +957,41 @@ async function runScan(){
     const batch=symbols.slice(i,i+CONCURRENCY);
     await Promise.all(batch.map(async sym=>{
       if(scanAborted)return;
-      const rows=await fetchCandles(sym,tf);
+      // Fetch selected TF + 4H bias in parallel (4H is skipped if already on 4H)
+      const [rows,bias4h]=await Promise.all([
+        fetchCandles(sym,tf),
+        is4HTF?Promise.resolve(null):get4HBias(sym)
+      ]);
       done++;
       setProgress(Math.round(done/total*100));
       document.getElementById("scan-info").textContent=
-        `Scanning ${total} pairs on ${tf.toUpperCase()} — ${done}/${total}  |  Signals: ${found}`;
+        `MTF Scan (4H+${tf.toUpperCase()}) — ${done}/${total}  |  Signals: ${found}`;
       if(!rows)return;
       const sig=evaluate(rows);
       if(!sig)return;
+
+      // ── 4H MTF HARD GATE ──
+      // Gate 1: 4H must have had a REAL cross (within 20 bars ~80h) — no cross = skip
+      // Gate 2: 4H cross direction must match signal direction
+      if(!is4HTF){
+        if(!bias4h)return;               // 4H data unavailable → skip (strict mode)
+        const isBuy=sig.signal==="BUY";
+        if(isBuy&&!bias4h.bull)return;              // closed 4H: EMA5 below EMA200 → discard BUY
+        if(!isBuy&&!bias4h.bear)return;             // closed 4H: EMA5 above EMA200 → discard SELL
+        if(isBuy&&bias4h.recentCross.dir!=='UP')return;   // most recent 4H cross was DN → discard BUY
+        if(!isBuy&&bias4h.recentCross.dir!=='DN')return;  // most recent 4H cross was UP → discard SELL
+        // bias4h.recentCross is always present here (get4HBias returns null if no cross)
+        sig.h4_confirmed=true;
+        sig.h4_bull=bias4h.bull;
+        sig.h4_fresh=bias4h.fresh;       // true = within last 5 × 4H bars (~20h)
+        // Confidence boost: fresh 4H cross (+15) vs older cross (+7)
+        sig.confidence=Math.min(100,sig.confidence+(bias4h.fresh?15:7));
+      }else{
+        sig.h4_confirmed=true;
+        sig.h4_bull=sig.bull_trend;
+        sig.h4_fresh=false;
+      }
+
       found++;
 
       // Persistence: track consecutive scan count
@@ -899,29 +1017,76 @@ async function runScan(){
   document.getElementById("status-txt").textContent="Idle";
   document.getElementById("scan-btn").style.display="inline-block";
   document.getElementById("stop-btn").style.display="none";
+  const mtfLabel=is4HTF?"4H only":"4H+"+tf.toUpperCase();
   document.getElementById("scan-info").textContent=
-    `✅ Scan complete — ${total} pairs | ${found} signals | ${now} | TF: ${tf.toUpperCase()}`;
-  log(`✅ Done. ${found} signals from ${total} pairs on ${tf}`);
+    `✅ MTF Scan (${mtfLabel}) complete — ${total} pairs | ${found} signals | ${now}`;
+  log(`✅ Done. ${found} MTF-confirmed signals from ${total} pairs (${mtfLabel})`);
 
-  const loopMins=parseInt(document.getElementById("loop-sel").value);
-  if(loopMins>0&&!scanAborted){
-    document.getElementById("status-txt").textContent=`Next in ${loopMins}m`;
-    loopTimer=setTimeout(()=>runScan(),loopMins*60*1000);
+  if(!scanAborted){
+    if(liveMode){
+      document.getElementById("status-txt").textContent="⚡ LIVE — restarting…";
+      document.getElementById("scan-info").textContent=`⚡ LIVE continuous — restarting scan… | Last: ${found} signals from ${total} pairs | ${now}`;
+      liveCountTimer=setTimeout(()=>{if(liveMode)runScan();},2000);
+    } else {
+      const loopMins=parseInt(document.getElementById("loop-sel").value);
+      if(loopMins>0){
+        document.getElementById("status-txt").textContent=`Next in ${loopMins}m`;
+        loopTimer=setTimeout(()=>runScan(),loopMins*60*1000);
+      }
+    }
   }
 }
 
 function startScan(){
   if(loopTimer){clearTimeout(loopTimer);loopTimer=null;}
+  stopLiveCountdown();
   runScan();
 }
+
 function stopScan(){
   scanAborted=true;
   if(loopTimer){clearTimeout(loopTimer);loopTimer=null;}
+  stopLiveCountdown();
+  if(liveMode){
+    liveMode=false;
+    const lb=document.getElementById("live-btn");
+    lb.classList.remove("active");
+    lb.textContent="⚡ LIVE";
+  }
   document.getElementById("dot").className="status-dot idle";
   document.getElementById("status-txt").textContent="Stopped";
   document.getElementById("scan-btn").style.display="inline-block";
   document.getElementById("stop-btn").style.display="none";
   log("⏹ Scan stopped.");
+}
+
+function toggleLive(){
+  liveMode=!liveMode;
+  const lb=document.getElementById("live-btn");
+  if(liveMode){
+    lb.classList.add("active");
+    lb.textContent="⚡ LIVE ON";
+    if(loopTimer){clearTimeout(loopTimer);loopTimer=null;}
+    log("⚡ LIVE mode ON — continuous scanning");
+    runScan();
+  } else {
+    lb.classList.remove("active");
+    lb.textContent="⚡ LIVE";
+    stopLiveCountdown();
+    log("⚡ LIVE mode OFF");
+  }
+}
+
+function stopLiveCountdown(){
+  if(liveCountTimer){clearTimeout(liveCountTimer);liveCountTimer=null;}
+  document.getElementById("countdown-bar").style.display="none";
+}
+
+function openChart(rawSym){
+  // URL format confirmed from Delta India: /app/futures/trade/{COIN}/{SYMBOL}
+  const coin=rawSym.endsWith("USDT")?rawSym.slice(0,-4):
+             rawSym.endsWith("USD") ?rawSym.slice(0,-3):rawSym;
+  window.open("https://www.delta.exchange/app/futures/trade/"+coin+"/"+rawSym,"delta_chart");
 }
 function setProgress(pct){document.getElementById("progress-bar").style.width=pct+"%";}
 
@@ -1010,15 +1175,16 @@ function renderTable(){
     return;
   }
   tbody.innerHTML=filtered.map((r,i)=>{
-    const s=r.s,sym=fmtSym(r.sym);
+    const s=r.s,sym=fmtSym(r.sym),rawSym=r.sym;
     const isBuy=s.signal==="BUY",isCross=s.type==="CROSSOVER";
     const isRecent=s.type==="RECENT CROSS",isPatt=s.type==="PATTERN";
     const sigBadge=isBuy?`<span class="badge buy">▲ BUY</span>`:`<span class="badge sell">▼ SELL</span>`;
 
-    // Type badge — RECENT CROSS shows how many bars ago
+    // Type badge — barsAgo=0 = this candle, 1 = last candle, 2-7 = recent
     let typeBadge;
-    if(isCross)        typeBadge=`<span class="badge cross">🔥 CROSS</span>`;
-    else if(isRecent)  typeBadge=`<span class="badge" style="background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.4)">⚡ ${s.barsAgo}bar ago</span>`;
+    if(isCross&&s.barsAgo===0) typeBadge=`<span class="badge cross" style="background:rgba(34,197,94,.25);color:#86efac;border-color:rgba(34,197,94,.7);animation:pulse .8s infinite">⚡ NOW</span>`;
+    else if(isCross)           typeBadge=`<span class="badge cross">🔥 CROSS</span>`;
+    else if(isRecent)          typeBadge=`<span class="badge" style="background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.4)">⚡ ${s.barsAgo}bar ago</span>`;
     else if(s.type==="NEAR CROSS") typeBadge=`<span class="badge near">👀 NEAR</span>`;
     else               typeBadge=`<span class="badge patt">📐 ${s.pattern||"PATTERN"}</span>`;
 
@@ -1037,10 +1203,18 @@ function renderTable(){
     else rsiCls="rsi-bear";
     const rsiEl=`<span class="${rsiCls}">${s.rsi.toFixed(1)}</span>`;
 
-    // Trend
+    // Trend + 4H MTF badge
     const trendEl=s.bull_trend?`<span class="trend-bull">▲ Bull</span>`:
                   s.bear_trend?`<span class="trend-bear">▼ Bear</span>`:
                   `<span style="color:var(--muted);font-size:10px">─ Side</span>`;
+    const h4dir=s.h4_bull?'↑':'↓';
+    const h4badge=s.h4_confirmed
+      ?(s.h4_fresh
+        ?`<span style="font-size:9px;background:rgba(34,197,94,.22);border:1px solid rgba(34,197,94,.6);border-radius:3px;padding:0 4px;color:#86efac;font-weight:700;margin-left:3px">4H🔥</span>`
+        :(s.h4_bull
+          ?`<span style="font-size:9px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);border-radius:3px;padding:0 4px;color:var(--yellow);margin-left:3px">4H↑</span>`
+          :`<span style="font-size:9px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);border-radius:3px;padding:0 4px;color:var(--red);margin-left:3px">4H↓</span>`))
+      :"";
 
     // Volume
     const volEl=s.vol_spike?`<span class="vol-ok">✔ ${s.vol_ratio.toFixed(1)}×</span>`:
@@ -1057,13 +1231,13 @@ function renderTable(){
     const newCls=r.isNew?" new-row":"";
 
     return `<tr class="${newCls}" data-idx="${i}">
-      <td style="color:var(--muted)">${i+1}&nbsp;<b style="color:var(--text)">${sym}</b></td>
+      <td style="color:var(--muted)">${i+1}&nbsp;<b style="color:var(--text)">${rawSym}</b>&nbsp;<button onclick="openChart('${rawSym}')" style="padding:1px 5px;font-size:10px;font-weight:700;background:rgba(6,182,212,.15);border:1px solid rgba(6,182,212,.5);border-radius:4px;color:var(--cyan);cursor:pointer;letter-spacing:.3px;vertical-align:middle" title="Open ${rawSym} chart on Delta India">📊</button></td>
       <td><b>${fmtPrice(s.price)}</b></td>
       <td>${sigBadge}</td>
       <td>${typeBadge} ${confBadge}</td>
       <td>${confEl}</td>
       <td>${rsiEl}&nbsp;${macdBadge}</td>
-      <td>${trendEl}</td>
+      <td>${trendEl}${h4badge}</td>
       <td>${volEl}</td>
       <td style="${gapColor};font-weight:600">${eg>0?"+":""}${eg.toFixed(3)}%</td>
       <td>${s.atr_pct.toFixed(3)}%</td>
