@@ -127,6 +127,7 @@ td{padding:5px 7px;white-space:nowrap}
   <div class="stat b"><div class="val" id="s-total">—</div><div class="lbl">Pairs Scanned</div></div>
   <div class="stat g"><div class="val" id="s-cbuy">0</div><div class="lbl">🔥 Cross BUY</div></div>
   <div class="stat r"><div class="val" id="s-csell">0</div><div class="lbl">🔥 Cross SELL</div></div>
+  <div class="stat" style="border-color:rgba(249,115,22,.4)"><div class="val" id="s-rcross" style="color:var(--orange)">0</div><div class="lbl">⚡ Recent Cross</div></div>
   <div class="stat p"><div class="val" id="s-patt">0</div><div class="lbl">📐 Patterns</div></div>
   <div class="stat c"><div class="val" id="s-hconf">0</div><div class="lbl">✅ High Conf ≥75</div></div>
   <div class="stat y"><div class="val" id="s-near">0</div><div class="lbl">👀 Near Cross</div></div>
@@ -168,11 +169,12 @@ td{padding:5px 7px;white-space:nowrap}
 </div>
 
 <div class="tabs">
-  <div class="tab active" id="tab-all"   onclick="switchTab('all')">All <span class="cnt" id="cnt-all">0</span></div>
-  <div class="tab"        id="tab-cross" onclick="switchTab('cross')">🔥 Crossover <span class="cnt" id="cnt-cross">0</span></div>
-  <div class="tab"        id="tab-patt"  onclick="switchTab('patt')">📐 Patterns <span class="cnt" id="cnt-patt">0</span></div>
-  <div class="tab"        id="tab-hconf" onclick="switchTab('hconf')">✅ High Conf <span class="cnt" id="cnt-hconf">0</span></div>
-  <div class="tab"        id="tab-near"  onclick="switchTab('near')">👀 Near Cross <span class="cnt" id="cnt-near">0</span></div>
+  <div class="tab active" id="tab-all"    onclick="switchTab('all')">All <span class="cnt" id="cnt-all">0</span></div>
+  <div class="tab"        id="tab-cross"  onclick="switchTab('cross')">🔥 Fresh Cross <span class="cnt" id="cnt-cross">0</span></div>
+  <div class="tab"        id="tab-rcross" onclick="switchTab('rcross')">⚡ Recent Cross <span class="cnt" id="cnt-rcross">0</span></div>
+  <div class="tab"        id="tab-patt"   onclick="switchTab('patt')">📐 Patterns <span class="cnt" id="cnt-patt">0</span></div>
+  <div class="tab"        id="tab-hconf"  onclick="switchTab('hconf')">✅ High Conf <span class="cnt" id="cnt-hconf">0</span></div>
+  <div class="tab"        id="tab-near"   onclick="switchTab('near')">👀 Near Cross <span class="cnt" id="cnt-near">0</span></div>
 </div>
 
 <div class="table-wrap">
@@ -221,7 +223,7 @@ const BB_MULT      = 2.0;
 const MIN_GAP_PCT  = 0.15;
 const MIN_ATR_PCT  = 0.08;
 const MIN_TP_PCT   = 0.25;
-const NEAR_CROSS   = 0.35;
+const NEAR_CROSS   = 0.20;   // tighter — EMA5 must be within 0.20% of EMA200
 const CANDLE_LIMIT = 280;  // need 200+ for reliable EMA200
 const CONCURRENCY  = 8;
 const MIN_CONF     = 45;   // global min confidence to emit any signal
@@ -593,6 +595,23 @@ function detectBumpRun(rows,atr){
   return null;
 }
 
+// Scan for EMA5×EMA200 cross within last `maxLookback` candles
+// Returns {dir:'UP'|'DN', barsAgo:N} or null
+function findRecentCross(e5arr, e200arr, n, maxLookback=7){
+  // Need enough history
+  if(n < maxLookback+2) return null;
+  for(let lag=0; lag<=maxLookback; lag++){
+    const ci=n-lag, pi=n-lag-1;
+    if(pi<0) break;
+    if(isNaN(e5arr[ci])||isNaN(e200arr[ci])||isNaN(e5arr[pi])||isNaN(e200arr[pi])) continue;
+    // Golden cross: was below, now above
+    if(e5arr[pi]<=e200arr[pi] && e5arr[ci]>e200arr[ci]) return{dir:'UP',barsAgo:lag};
+    // Death cross: was above, now below
+    if(e5arr[pi]>=e200arr[pi] && e5arr[ci]<e200arr[ci]) return{dir:'DN',barsAgo:lag};
+  }
+  return null;
+}
+
 // ═══════════════════════════════════════════════════
 // MAIN EVALUATE — Primary: EMA5 × EMA200 + MACD(12,26,9)
 // ═══════════════════════════════════════════════════
@@ -724,15 +743,21 @@ function evaluate(rows){
   }
 
   // ── Signal builder ──
-  function mkSig(type,dir,pat,patData){
+  function mkSig(type,dir,pat,patData,barsAgo=0){
     const lv=levels(dir);
     if(lv.tp2_p<MIN_TP_PCT)return null;
-    const baseScore=type==="CROSSOVER"?48:type==="NEAR CROSS"?26:(patData&&patData.confirmed?50:36);
+    // Base score: fresh cross=52, 1-2 bars=48, 3-5 bars=44, 6-7 bars=40
+    // RECENT CROSS base is slightly lower than fresh CROSSOVER — MACD+vol still boost it
+    let baseScore;
+    if(type==="CROSSOVER")      baseScore=52;
+    else if(type==="RECENT CROSS") baseScore=barsAgo<=2?48:barsAgo<=5?44:40;
+    else if(type==="NEAR CROSS") baseScore=26;
+    else                         baseScore=(patData&&patData.confirmed?50:36);
     const c=conf(dir,baseScore);
     if(c<MIN_CONF)return null;
     return{
       type,signal:dir,pattern:pat||null,patternData:patData||null,
-      confidence:c,...lv,
+      barsAgo,confidence:c,...lv,
       price,
       ema5:e5now,ema200:e200now,ema_gap_pct:Math.round(emaGapPct*10000)/10000,
       bb_mid,bb_up,bb_lo,
@@ -750,16 +775,21 @@ function evaluate(rows){
 
   // ════════════════════════════════════════════════
   // SIGNAL 1 — EMA5 × EMA200 CROSSOVER (PRIMARY)
-  //   Require: fresh EMA cross + MACD confirms direction
-  //   Anti-false-breakout: volume + candle quality
+  //   Looks back 7 candles so slow scans NEVER miss a cross
+  //   barsAgo=0-1 → CROSSOVER (fresh)
+  //   barsAgo=2-7 → RECENT CROSS (crossed but still valid)
+  //   MACD must confirm + volume + quality candle required
   // ════════════════════════════════════════════════
-  const emaCrossBuy =(emaCrossUp||freshUp)&&macdBull&&(volSpike||volMod)&&qualityCandle;
-  const emaCrossSell=(emaCrossDn||freshDn)&&macdBear&&(volSpike||volMod)&&qualityCandle;
-
-  if(emaCrossBuy||emaCrossSell){
-    const dir=emaCrossBuy?"BUY":"SELL";
-    const sig=mkSig("CROSSOVER",dir,null,null);
-    if(sig)return sig;
+  const rc=findRecentCross(e5arr,e200arr,n,7);
+  if(rc){
+    const dir=rc.dir==="UP"?"BUY":"SELL";
+    const macdOk=dir==="BUY"?macdBull:macdBear;
+    if(macdOk&&(volSpike||volMod)&&qualityCandle){
+      // Fresh (0-1 bars) = CROSSOVER, older (2-7 bars) = RECENT CROSS
+      const type=rc.barsAgo<=1?"CROSSOVER":"RECENT CROSS";
+      const sig=mkSig(type,dir,null,null,rc.barsAgo);
+      if(sig)return sig;
+    }
   }
 
   // ════════════════════════════════════════════════
@@ -899,20 +929,25 @@ function setProgress(pct){document.getElementById("progress-bar").style.width=pc
 // STATS
 // ═══════════════════════════════════════════════════
 function updateStats(){
-  const cross=allSignals.filter(r=>r.s.type==="CROSSOVER");
-  const near =allSignals.filter(r=>r.s.type==="NEAR CROSS");
-  const patt =allSignals.filter(r=>r.s.type==="PATTERN");
-  const hconf=allSignals.filter(r=>r.s.confidence>=75);
-  document.getElementById("s-cbuy").textContent =cross.filter(r=>r.s.signal==="BUY").length;
-  document.getElementById("s-csell").textContent=cross.filter(r=>r.s.signal==="SELL").length;
-  document.getElementById("s-patt").textContent =patt.length;
-  document.getElementById("s-hconf").textContent=hconf.length;
-  document.getElementById("s-near").textContent =near.length;
-  document.getElementById("cnt-all").textContent  =allSignals.length;
-  document.getElementById("cnt-cross").textContent=cross.length;
-  document.getElementById("cnt-patt").textContent =patt.length;
-  document.getElementById("cnt-hconf").textContent=hconf.length;
-  document.getElementById("cnt-near").textContent =near.length;
+  const cross  =allSignals.filter(r=>r.s.type==="CROSSOVER");
+  const rcross =allSignals.filter(r=>r.s.type==="RECENT CROSS");
+  const near   =allSignals.filter(r=>r.s.type==="NEAR CROSS");
+  const patt   =allSignals.filter(r=>r.s.type==="PATTERN");
+  const hconf  =allSignals.filter(r=>r.s.confidence>=75);
+  // Stats row
+  document.getElementById("s-cbuy").textContent  =cross.filter(r=>r.s.signal==="BUY").length;
+  document.getElementById("s-csell").textContent =cross.filter(r=>r.s.signal==="SELL").length;
+  document.getElementById("s-rcross").textContent=rcross.length;
+  document.getElementById("s-patt").textContent  =patt.length;
+  document.getElementById("s-hconf").textContent =hconf.length;
+  document.getElementById("s-near").textContent  =near.length;
+  // Tab counts
+  document.getElementById("cnt-all").textContent   =allSignals.length;
+  document.getElementById("cnt-cross").textContent =cross.length;
+  document.getElementById("cnt-rcross").textContent=rcross.length;
+  document.getElementById("cnt-patt").textContent  =patt.length;
+  document.getElementById("cnt-hconf").textContent =hconf.length;
+  document.getElementById("cnt-near").textContent  =near.length;
 }
 
 // ═══════════════════════════════════════════════════
@@ -924,7 +959,7 @@ function sortBy(key){
 }
 function switchTab(tab){
   activeTab=tab;
-  ["all","cross","patt","hconf","near"].forEach(t=>{
+  ["all","cross","rcross","patt","hconf","near"].forEach(t=>{
     document.getElementById("tab-"+t).className="tab"+(t===tab?" active":"");
   });
   renderTable();
@@ -937,10 +972,11 @@ function getFiltered(){
   const minC =parseInt(document.getElementById("conf-filter").value)||0;
   const volOk=document.getElementById("vol-filter").checked;
   return allSignals.filter(r=>{
-    if(activeTab==="cross" &&r.s.type!=="CROSSOVER")return false;
-    if(activeTab==="near"  &&r.s.type!=="NEAR CROSS")return false;
-    if(activeTab==="patt"  &&r.s.type!=="PATTERN")return false;
-    if(activeTab==="hconf" &&r.s.confidence<75)return false;
+    if(activeTab==="cross"  &&r.s.type!=="CROSSOVER")return false;
+    if(activeTab==="rcross" &&r.s.type!=="RECENT CROSS")return false;
+    if(activeTab==="near"   &&r.s.type!=="NEAR CROSS")return false;
+    if(activeTab==="patt"   &&r.s.type!=="PATTERN")return false;
+    if(activeTab==="hconf"  &&r.s.confidence<75)return false;
     if(sym&&!r.sym.includes(sym))return false;
     if(sig!=="ALL"&&r.s.signal!==sig)return false;
     if(type!=="ALL"&&r.s.type!==type)return false;
@@ -975,14 +1011,16 @@ function renderTable(){
   }
   tbody.innerHTML=filtered.map((r,i)=>{
     const s=r.s,sym=fmtSym(r.sym);
-    const isBuy=s.signal==="BUY",isCross=s.type==="CROSSOVER",isPatt=s.type==="PATTERN";
+    const isBuy=s.signal==="BUY",isCross=s.type==="CROSSOVER";
+    const isRecent=s.type==="RECENT CROSS",isPatt=s.type==="PATTERN";
     const sigBadge=isBuy?`<span class="badge buy">▲ BUY</span>`:`<span class="badge sell">▼ SELL</span>`;
 
-    // Type badge
+    // Type badge — RECENT CROSS shows how many bars ago
     let typeBadge;
-    if(isCross) typeBadge=`<span class="badge cross">🔥 CROSS</span>`;
+    if(isCross)        typeBadge=`<span class="badge cross">🔥 CROSS</span>`;
+    else if(isRecent)  typeBadge=`<span class="badge" style="background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.4)">⚡ ${s.barsAgo}bar ago</span>`;
     else if(s.type==="NEAR CROSS") typeBadge=`<span class="badge near">👀 NEAR</span>`;
-    else typeBadge=`<span class="badge patt">📐 ${s.pattern||"PATTERN"}</span>`;
+    else               typeBadge=`<span class="badge patt">📐 ${s.pattern||"PATTERN"}</span>`;
 
     // Confirmation badge
     const confBadge=r.count>=3?`<span class="badge confirmed-b">✓ ${r.count}×</span>`:"";
@@ -1053,9 +1091,14 @@ function showDetail(idx){
   const isBuy=s.signal==="BUY",col=isBuy?"var(--green)":"var(--red)";
   const tf=document.getElementById("tf-sel").value.toUpperCase();
 
+  const crossLabel=s.type==="CROSSOVER"?"🔥 FRESH CROSS (just now)":
+                   s.type==="RECENT CROSS"?`⚡ RECENT CROSS (${s.barsAgo} bars ago)`:
+                   s.type==="NEAR CROSS"?"👀 NEAR CROSS (approaching)":
+                   s.type==="PATTERN"?`📐 ${s.pattern}`:"";
   document.getElementById("d-title").innerHTML=
     `<span style="color:${col}">${sym}</span> &nbsp;·&nbsp; ${s.signal} &nbsp;·&nbsp;
-     <span style="color:${confColor(s.confidence)}">${s.confidence}% Confidence</span>`;
+     <span style="color:${confColor(s.confidence)}">${s.confidence}%</span>&nbsp;
+     <span style="font-size:11px;color:var(--muted)">${crossLabel}</span>`;
 
   // Pattern info section
   let patSection="";
@@ -1088,6 +1131,7 @@ function showDetail(idx){
       <span style="color:var(--green)">${fmtPrice(s.tp2)} &nbsp;(${isBuy?"+":"-"}${s.tp2_p.toFixed(3)}% · 3×ATR)</span></div>
     <div class="trow"><span class="tk">R:R Ratio</span>
       <b style="color:var(--accent)">1:${s.rr} &nbsp;|&nbsp; Risk max 2% capital</b></div>
+    ${s.type==="RECENT CROSS"?`<div class="trow"><span class="tk">Cross Age</span><b style="color:var(--orange)">⚡ ${s.barsAgo} candle${s.barsAgo>1?"s":""} ago — MACD still confirms ✅</b></div>`:""}
     ${r.count>=2?`<div class="trow"><span class="tk">Scan Confirmations</span><b style="color:var(--green)">✅ ${r.count} consecutive scans — HIGH CONFIDENCE</b></div>`:""}
   </div>`;
 
