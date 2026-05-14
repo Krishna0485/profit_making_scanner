@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>⚡ Profit Scanner — EMA5×EMA200 + MACD | 15M Intraday</title>
+<title>⚡ Profit Scanner — 4H + TF EMA5×EMA200 Pure Cross</title>
 <style>
 :root{
   --bg:#0a0e1a;--panel:#111827;--border:#1f2937;--accent:#3b82f6;
@@ -108,7 +108,7 @@ button.live-btn.active{background:var(--red);border-color:#b91c1c;color:#fff}
 <body>
 
 <div class="topbar">
-  <h1>⚡ PROFIT SCANNER — <span>EMA5 × EMA200 + MACD | 15M INTRADAY</span></h1>
+  <h1>⚡ PROFIT SCANNER — <span>4H + TF EMA5 × EMA200 PURE CROSS</span></h1>
   <div class="controls">
     <span><span class="status-dot idle" id="dot"></span><span id="status-txt">Idle</span></span>
     <select id="tf-sel">
@@ -143,9 +143,8 @@ button.live-btn.active{background:var(--red);border-color:#b91c1c;color:#fff}
   <div class="stat g"><div class="val" id="s-cbuy">0</div><div class="lbl">🔥 Cross BUY</div></div>
   <div class="stat r"><div class="val" id="s-csell">0</div><div class="lbl">🔥 Cross SELL</div></div>
   <div class="stat" style="border-color:rgba(249,115,22,.4)"><div class="val" id="s-rcross" style="color:var(--orange)">0</div><div class="lbl">⚡ Recent Cross</div></div>
-  <div class="stat p"><div class="val" id="s-patt">0</div><div class="lbl">📐 Patterns</div></div>
+  <div class="stat" style="border-color:rgba(245,158,11,.4)"><div class="val" id="s-near" style="color:var(--yellow)">0</div><div class="lbl">👀 Near Cross</div></div>
   <div class="stat c"><div class="val" id="s-hconf">0</div><div class="lbl">✅ High Conf ≥75</div></div>
-  <div class="stat y"><div class="val" id="s-near">0</div><div class="lbl">👀 Near Cross</div></div>
   <div class="stat" style="margin-left:auto"><div class="val" id="s-time" style="font-size:13px;color:var(--muted)">—</div><div class="lbl">Last Scan</div></div>
 </div>
 
@@ -160,22 +159,10 @@ button.live-btn.active{background:var(--red);border-color:#b91c1c;color:#fff}
   </select>
   <label>Type:</label>
   <select id="type-filter" onchange="renderTable()">
-    <option value="ALL">All Types</option>
-    <option value="CROSSOVER">Crossover</option>
-    <option value="RECENT CROSS">Recent Cross</option>
-    <option value="NEAR CROSS">Near Cross</option>
-    <option value="PATTERN">Patterns</option>
-  </select>
-  <label>Pattern:</label>
-  <select id="patt-filter" onchange="renderTable()">
-    <option value="ALL">All Patterns</option>
-    <option value="1-2-3 REVERSAL">1-2-3 Reversal</option>
-    <option value="CUP & HANDLE">Cup &amp; Handle</option>
-    <option value="BROADENING">Broadening</option>
-    <option value="ASC WEDGE">Asc Wedge</option>
-    <option value="DESC WEDGE">Desc Wedge</option>
-    <option value="BUMP & RUN">Bump &amp; Run</option>
-    <option value="TRENDLINE BRK">Trendline Break</option>
+    <option value="ALL">All</option>
+    <option value="CROSSOVER">🔥 Fresh Cross</option>
+    <option value="RECENT CROSS">⚡ Recent Cross</option>
+    <option value="NEAR CROSS">👀 Near Cross</option>
   </select>
   <label>Min Conf%:</label>
   <input type="range" id="conf-filter" min="0" max="90" step="5" value="0"
@@ -189,9 +176,8 @@ button.live-btn.active{background:var(--red);border-color:#b91c1c;color:#fff}
   <div class="tab active" id="tab-all"    onclick="switchTab('all')">All <span class="cnt" id="cnt-all">0</span></div>
   <div class="tab"        id="tab-cross"  onclick="switchTab('cross')">🔥 Fresh Cross <span class="cnt" id="cnt-cross">0</span></div>
   <div class="tab"        id="tab-rcross" onclick="switchTab('rcross')">⚡ Recent Cross <span class="cnt" id="cnt-rcross">0</span></div>
-  <div class="tab"        id="tab-patt"   onclick="switchTab('patt')">📐 Patterns <span class="cnt" id="cnt-patt">0</span></div>
-  <div class="tab"        id="tab-hconf"  onclick="switchTab('hconf')">✅ High Conf <span class="cnt" id="cnt-hconf">0</span></div>
   <div class="tab"        id="tab-near"   onclick="switchTab('near')">👀 Near Cross <span class="cnt" id="cnt-near">0</span></div>
+  <div class="tab"        id="tab-hconf"  onclick="switchTab('hconf')">✅ High Conf ≥75 <span class="cnt" id="cnt-hconf">0</span></div>
 </div>
 
 <div class="table-wrap">
@@ -316,27 +302,30 @@ async function fetchCandles(symbol,resolution){
   }catch(e){return null;}
 }
 
-// 4H EMA5×EMA200 cross gate — requires actual recent 4H cross, not just trend
+// 4H EMA5×EMA200 trend bias — pure trend position filter (no cross required)
+// Uses last CLOSED 4H bar (n-1) to avoid partial-candle spike artifacts
 async function get4HBias(symbol){
   try{
     const rows=await fetchCandles(symbol,"4h");
-    if(!rows||rows.length<205)return null;
+    if(!rows||rows.length<202)return null;
     const C=rows.map(r=>r.close);
     const e5arr=ema(C,5),e200arr=ema(C,200);
     const n=rows.length-1;
-    if(isNaN(e5arr[n])||isNaN(e200arr[n]))return null;
-    // Use n-1 (last CLOSED 4H bar) — exclude current forming candle to avoid spike artifacts
-    const cn=n-1;
+    const cn=n-1;  // last CLOSED 4H bar — exclude forming candle
     if(isNaN(e5arr[cn])||isNaN(e200arr[cn]))return null;
-    // Look back up to 20 × 4H bars (~80h / 3.3 days) for a real cross event
-    const rc=findRecentCross(e5arr,e200arr,cn,20);
-    // recentCross MUST exist — just being in trend is not enough
-    if(!rc)return null;
+    // Look back up to 30 × 4H bars for recent cross (badge/freshness only — not a gate)
+    const rc=findRecentCross(e5arr,e200arr,cn,30);
+    // EMA slope over last 3 closed bars (guard against index underflow)
+    const cnPrev=Math.max(cn-3,0);
+    const slope=(e5arr[cnPrev]&&!isNaN(e5arr[cnPrev]))
+      ?(e5arr[cn]-e5arr[cnPrev])/(e5arr[cnPrev]||1)*100:0;
     return{
       bull:e5arr[cn]>e200arr[cn],
       bear:e5arr[cn]<e200arr[cn],
-      recentCross:rc,          // always present
-      fresh:rc.barsAgo<=5     // "fresh" = within last 5 × 4H bars (~20h)
+      e5:e5arr[cn],e200:e200arr[cn],
+      recentCross:rc||null,            // optional — used for badge only
+      fresh:rc?rc.barsAgo<=5:false,    // within last ~20h
+      slope:Math.round(slope*1000)/1000 // EMA5 slope % over 3 bars
     };
   }catch(e){return null;}
 }
@@ -839,13 +828,8 @@ function evaluate(rows){
   function mkSig(type,dir,pat,patData,barsAgo=0){
     const lv=levels(dir);
     if(lv.tp2_p<MIN_TP_PCT)return null;
-    // Base score: fresh cross=52, 1-2 bars=48, 3-5 bars=44, 6-7 bars=40
-    // RECENT CROSS base is slightly lower than fresh CROSSOVER — MACD+vol still boost it
-    let baseScore;
-    if(type==="CROSSOVER")      baseScore=52;
-    else if(type==="RECENT CROSS") baseScore=barsAgo<=2?48:barsAgo<=5?44:40;
-    else if(type==="NEAR CROSS") baseScore=26;
-    else                         baseScore=(patData&&patData.confirmed?50:36);
+    // Base score by signal quality: CROSSOVER > RECENT > NEAR
+    const baseScore=type==="CROSSOVER"?52:type==="NEAR CROSS"?36:barsAgo<=2?48:barsAgo<=5?44:40;
     const c=conf(dir,baseScore);
     if(c<MIN_CONF)return null;
     return{
@@ -867,58 +851,37 @@ function evaluate(rows){
   }
 
   // ════════════════════════════════════════════════
-  // SIGNAL 1 — EMA5 × EMA200 CROSSOVER (PRIMARY)
-  //   HARD GATE: EMA cross happened (within 7 bars) + MACD confirms direction
-  //   Volume, candle quality, RSI → confidence score ONLY, never block signal
-  //   barsAgo 0-1 = CROSSOVER (fresh), 2-7 = RECENT CROSS
+  // PURE CROSS SIGNAL — EMA5 × EMA200 on selected TF
+  //   Lookback: 10 bars (wider net, 4H trend gate handles quality)
+  //   MACD hard gate: direction must align (key quality filter)
+  //   RSI extreme filter: no buys above 78, no sells below 22
+  //   barsAgo 0-1 = CROSSOVER (fresh), 2-10 = RECENT CROSS
   // ════════════════════════════════════════════════
-  const rc=findRecentCross(e5arr,e200arr,n,7);
+  const rc=findRecentCross(e5arr,e200arr,n,10);
   if(rc){
     const dir=rc.dir==="UP"?"BUY":"SELL";
-    // Only two hard requirements: cross happened + MACD on same side
-    const macdOk=dir==="BUY"?macdBull:macdBear;
-    if(macdOk){
-      const type=rc.barsAgo<=1?"CROSSOVER":"RECENT CROSS";
-      const sig=mkSig(type,dir,null,null,rc.barsAgo);
-      if(sig)return sig;
-    }
+    // MACD momentum gate: histogram must be building in the right direction
+    // (looser than requiring full cross — allows entry as momentum builds)
+    const macdMomOk = dir==="BUY" ? (macdBull||histRising) : (macdBear||histFall);
+    if(!macdMomOk)return null;
+    // RSI extreme filter — don't chase overbought/oversold
+    if(dir==="BUY"&&rsiNow>=78)return null;
+    if(dir==="SELL"&&rsiNow<=22)return null;
+    const type=rc.barsAgo<=1?"CROSSOVER":"RECENT CROSS";
+    return mkSig(type,dir,null,null,rc.barsAgo);
   }
 
-  // ════════════════════════════════════════════════
-  // SIGNAL 2 — NEAR CROSS (EMA5 within 0.20% of EMA200, approaching)
-  //   HARD GATE: direction of approach only — no volume/quality gate
-  // ════════════════════════════════════════════════
-  if(absEmaGap<NEAR_CROSS){
-    const apUp=e5now>e5p1&&e5now<e200now;  // EMA5 rising toward EMA200 from below
-    const apDn=e5now<e5p1&&e5now>e200now;  // EMA5 falling toward EMA200 from above
-    if(apUp||apDn){
-      const dir=apUp?"BUY":"SELL";
-      const sig=mkSig("NEAR CROSS",dir,null,null,0);
-      if(sig)return sig;
-    }
-  }
-
-  // ════════════════════════════════════════════════
-  // SIGNAL 3 — ADVANCED CHART PATTERNS
-  //   Pattern detection runs only when no EMA/MACD cross found
-  //   MACD must agree with pattern direction for emission
-  // ════════════════════════════════════════════════
-  const patChecks=[
-    ()=>detect123(rows,atr),
-    ()=>detectCupHandle(rows,atr),
-    ()=>detectBroadening(rows),
-    ()=>detectWedge(rows),
-    ()=>detectBumpRun(rows,atr),
-    ()=>detectTrendlineBreakout(rows)
-  ];
-  for(const fn of patChecks){
-    const p=fn();
-    if(!p)continue;
-    // Pattern direction must agree with MACD — prevents false-breakout patterns
-    const macdAgrees=(p.patternDir==="BUY"?macdBull:macdBear);
-    if(!macdAgrees)continue;
-    const sig=mkSig("PATTERN",p.patternDir,p.pattern,p);
-    if(sig)return sig;
+  // ── NEAR CROSS — EMA5 within 0.20% of EMA200, momentum heading toward cross ──
+  const nearUp=e5now<e200now&&absEmaGap<=NEAR_CROSS&&e5now>e5p1;  // below EMA200, EMA5 rising
+  const nearDn=e5now>e200now&&absEmaGap<=NEAR_CROSS&&e5now<e5p1;  // above EMA200, EMA5 falling
+  if(nearUp||nearDn){
+    const ndir=nearUp?"BUY":"SELL";
+    // Near cross needs at least MACD histogram building in right direction
+    if(ndir==="BUY"&&!(macdBull||histRising))return null;
+    if(ndir==="SELL"&&!(macdBear||histFall))return null;
+    if(ndir==="BUY"&&rsiNow>=75)return null;
+    if(ndir==="SELL"&&rsiNow<=25)return null;
+    return mkSig("NEAR CROSS",ndir,null,null,0);
   }
 
   return null;
@@ -971,21 +934,19 @@ async function runScan(){
       if(!sig)return;
 
       // ── 4H MTF HARD GATE ──
-      // Gate 1: 4H must have had a REAL cross (within 20 bars ~80h) — no cross = skip
-      // Gate 2: 4H cross direction must match signal direction
+      // Pure trend position: 4H EMA5 must be on the correct side of EMA200
+      // No cross timing requirement — only direction alignment matters
       if(!is4HTF){
-        if(!bias4h)return;               // 4H data unavailable → skip (strict mode)
+        if(!bias4h)return;               // 4H data unavailable → skip
         const isBuy=sig.signal==="BUY";
-        if(isBuy&&!bias4h.bull)return;              // closed 4H: EMA5 below EMA200 → discard BUY
-        if(!isBuy&&!bias4h.bear)return;             // closed 4H: EMA5 above EMA200 → discard SELL
-        if(isBuy&&bias4h.recentCross.dir!=='UP')return;   // most recent 4H cross was DN → discard BUY
-        if(!isBuy&&bias4h.recentCross.dir!=='DN')return;  // most recent 4H cross was UP → discard SELL
-        // bias4h.recentCross is always present here (get4HBias returns null if no cross)
+        if(isBuy&&!bias4h.bull)return;   // 4H EMA5 below EMA200 → reject BUY
+        if(!isBuy&&!bias4h.bear)return;  // 4H EMA5 above EMA200 → reject SELL
         sig.h4_confirmed=true;
         sig.h4_bull=bias4h.bull;
-        sig.h4_fresh=bias4h.fresh;       // true = within last 5 × 4H bars (~20h)
-        // Confidence boost: fresh 4H cross (+15) vs older cross (+7)
-        sig.confidence=Math.min(100,sig.confidence+(bias4h.fresh?15:7));
+        sig.h4_fresh=bias4h.fresh;       // true = 4H cross within last ~20h (badge only)
+        sig.h4_slope=bias4h.slope;       // EMA5 slope for display
+        // Confidence boost: fresh 4H cross (+15) vs steady trend (+5)
+        sig.confidence=Math.min(100,sig.confidence+(bias4h.fresh?15:5));
       }else{
         sig.h4_confirmed=true;
         sig.h4_bull=sig.bull_trend;
@@ -1094,25 +1055,20 @@ function setProgress(pct){document.getElementById("progress-bar").style.width=pc
 // STATS
 // ═══════════════════════════════════════════════════
 function updateStats(){
-  const cross  =allSignals.filter(r=>r.s.type==="CROSSOVER");
-  const rcross =allSignals.filter(r=>r.s.type==="RECENT CROSS");
-  const near   =allSignals.filter(r=>r.s.type==="NEAR CROSS");
-  const patt   =allSignals.filter(r=>r.s.type==="PATTERN");
-  const hconf  =allSignals.filter(r=>r.s.confidence>=75);
-  // Stats row
+  const cross =allSignals.filter(r=>r.s.type==="CROSSOVER");
+  const rcross=allSignals.filter(r=>r.s.type==="RECENT CROSS");
+  const near  =allSignals.filter(r=>r.s.type==="NEAR CROSS");
+  const hconf =allSignals.filter(r=>r.s.confidence>=75);
   document.getElementById("s-cbuy").textContent  =cross.filter(r=>r.s.signal==="BUY").length;
   document.getElementById("s-csell").textContent =cross.filter(r=>r.s.signal==="SELL").length;
   document.getElementById("s-rcross").textContent=rcross.length;
-  document.getElementById("s-patt").textContent  =patt.length;
-  document.getElementById("s-hconf").textContent =hconf.length;
   document.getElementById("s-near").textContent  =near.length;
-  // Tab counts
+  document.getElementById("s-hconf").textContent =hconf.length;
   document.getElementById("cnt-all").textContent   =allSignals.length;
   document.getElementById("cnt-cross").textContent =cross.length;
   document.getElementById("cnt-rcross").textContent=rcross.length;
-  document.getElementById("cnt-patt").textContent  =patt.length;
-  document.getElementById("cnt-hconf").textContent =hconf.length;
   document.getElementById("cnt-near").textContent  =near.length;
+  document.getElementById("cnt-hconf").textContent =hconf.length;
 }
 
 // ═══════════════════════════════════════════════════
@@ -1124,7 +1080,7 @@ function sortBy(key){
 }
 function switchTab(tab){
   activeTab=tab;
-  ["all","cross","rcross","patt","hconf","near"].forEach(t=>{
+  ["all","cross","rcross","near","hconf"].forEach(t=>{
     document.getElementById("tab-"+t).className="tab"+(t===tab?" active":"");
   });
   renderTable();
@@ -1133,19 +1089,16 @@ function getFiltered(){
   const sym  =document.getElementById("sym-filter").value.trim().toUpperCase();
   const sig  =document.getElementById("sig-filter").value;
   const type =document.getElementById("type-filter").value;
-  const patt =document.getElementById("patt-filter").value;
   const minC =parseInt(document.getElementById("conf-filter").value)||0;
   const volOk=document.getElementById("vol-filter").checked;
   return allSignals.filter(r=>{
-    if(activeTab==="cross"  &&r.s.type!=="CROSSOVER")return false;
-    if(activeTab==="rcross" &&r.s.type!=="RECENT CROSS")return false;
-    if(activeTab==="near"   &&r.s.type!=="NEAR CROSS")return false;
-    if(activeTab==="patt"   &&r.s.type!=="PATTERN")return false;
-    if(activeTab==="hconf"  &&r.s.confidence<75)return false;
+    if(activeTab==="cross" &&r.s.type!=="CROSSOVER")return false;
+    if(activeTab==="rcross"&&r.s.type!=="RECENT CROSS")return false;
+    if(activeTab==="near"  &&r.s.type!=="NEAR CROSS")return false;
+    if(activeTab==="hconf" &&r.s.confidence<75)return false;
     if(sym&&!r.sym.includes(sym))return false;
     if(sig!=="ALL"&&r.s.signal!==sig)return false;
     if(type!=="ALL"&&r.s.type!==type)return false;
-    if(patt!=="ALL"&&r.s.pattern!==patt)return false;
     if(r.s.confidence<minC)return false;
     if(volOk&&!r.s.vol_spike)return false;
     return true;
@@ -1177,16 +1130,15 @@ function renderTable(){
   tbody.innerHTML=filtered.map((r,i)=>{
     const s=r.s,sym=fmtSym(r.sym),rawSym=r.sym;
     const isBuy=s.signal==="BUY",isCross=s.type==="CROSSOVER";
-    const isRecent=s.type==="RECENT CROSS",isPatt=s.type==="PATTERN";
+    const isRecent=s.type==="RECENT CROSS",isNear=s.type==="NEAR CROSS";
     const sigBadge=isBuy?`<span class="badge buy">▲ BUY</span>`:`<span class="badge sell">▼ SELL</span>`;
 
-    // Type badge — barsAgo=0 = this candle, 1 = last candle, 2-7 = recent
+    // Type badge: ⚡ NOW / 🔥 CROSS / ⚡ Nbar ago / 👀 NEAR
     let typeBadge;
     if(isCross&&s.barsAgo===0) typeBadge=`<span class="badge cross" style="background:rgba(34,197,94,.25);color:#86efac;border-color:rgba(34,197,94,.7);animation:pulse .8s infinite">⚡ NOW</span>`;
     else if(isCross)           typeBadge=`<span class="badge cross">🔥 CROSS</span>`;
-    else if(isRecent)          typeBadge=`<span class="badge" style="background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.4)">⚡ ${s.barsAgo}bar ago</span>`;
-    else if(s.type==="NEAR CROSS") typeBadge=`<span class="badge near">👀 NEAR</span>`;
-    else               typeBadge=`<span class="badge patt">📐 ${s.pattern||"PATTERN"}</span>`;
+    else if(isNear)            typeBadge=`<span class="badge near">👀 NEAR</span>`;
+    else                       typeBadge=`<span class="badge" style="background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.4)">⚡ ${s.barsAgo}bar ago</span>`;
 
     // Confirmation badge
     const confBadge=r.count>=3?`<span class="badge confirmed-b">✓ ${r.count}×</span>`:"";
@@ -1267,7 +1219,7 @@ function showDetail(idx){
 
   const crossLabel=s.type==="CROSSOVER"?"🔥 FRESH CROSS (just now)":
                    s.type==="RECENT CROSS"?`⚡ RECENT CROSS (${s.barsAgo} bars ago)`:
-                   s.type==="NEAR CROSS"?"👀 NEAR CROSS (approaching)":
+                   s.type==="NEAR CROSS"?`👀 NEAR CROSS — EMA5 within ${Math.abs(s.ema_gap_pct||0).toFixed(3)}% of EMA200`:
                    s.type==="PATTERN"?`📐 ${s.pattern}`:"";
   document.getElementById("d-title").innerHTML=
     `<span style="color:${col}">${sym}</span> &nbsp;·&nbsp; ${s.signal} &nbsp;·&nbsp;
@@ -1341,14 +1293,49 @@ function showDetail(idx){
                    s.macd_bull?"▲ MACD above Signal":"▼ MACD below Signal";
   const macdStatusColor=s.macd_bull?"var(--green)":"var(--red)";
 
+  // ── Advanced Analysis: signal strength rating ──
+  const advChecks=[
+    {ok:isBuy?s.bull_trend:s.bear_trend, wt:25, label:"EMA Cross Alignment"},
+    {ok:isBuy?s.macd_bull:!s.macd_bull,  wt:20, label:"MACD Direction"},
+    {ok:isBuy?s.macd_cross_up:s.macd_cross_dn, wt:10, label:"MACD Fresh Cross"},
+    {ok:s.vol_spike,                      wt:15, label:"Volume Spike"},
+    {ok:isBuy?s.rsi>50&&s.rsi<70:s.rsi<50&&s.rsi>30, wt:10, label:"RSI Zone"},
+    {ok:isBuy?s.above_e50:s.below_e50,   wt:10, label:"EMA50 Trend Filter"},
+    {ok:s.h4_confirmed&&(isBuy?s.h4_bull:!s.h4_bull), wt:10, label:"4H Trend Aligned"},
+  ];
+  const advScore=advChecks.reduce((sum,c)=>sum+(c.ok?c.wt:0),0);
+  const advRating=advScore>=85?"🟢 STRONG":advScore>=65?"🟡 MODERATE":advScore>=45?"🟠 WEAK":"🔴 CAUTION";
+  const advColor=advScore>=85?"var(--green)":advScore>=65?"var(--yellow)":advScore>=45?"var(--orange)":"var(--red)";
+
+  // RSI zone label
+  const rsiZone=s.rsi>=70?"⚠ Overbought":s.rsi>=60?"Bullish Zone":s.rsi>=50?"Neutral-Bull":
+                s.rsi<=30?"⚠ Oversold":s.rsi<=40?"Bearish Zone":"Neutral-Bear";
+  const bbPos=s.bb_up!==s.bb_lo?((s.price-s.bb_lo)/(s.bb_up-s.bb_lo)*100).toFixed(1):"—";
+  const h4SlopeColor=(s.h4_slope||0)>0?"var(--green)":"var(--red)";
+
   document.getElementById("d-content").innerHTML=`
+  <!-- ADVANCED ANALYSIS HEADER -->
+  <div style="background:linear-gradient(135deg,#0d1a2e,#0a1628);border:1px solid ${advColor};border-radius:8px;padding:12px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.8px">ADVANCED ANALYSIS</span>
+      <span style="font-size:13px;font-weight:700;color:${advColor}">${advRating} &nbsp;${advScore}/100</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">
+      ${advChecks.map(c=>`<div style="text-align:center;background:${c.ok?"rgba(34,197,94,.12)":"rgba(255,255,255,.04)"};border:1px solid ${c.ok?"rgba(34,197,94,.4)":"rgba(255,255,255,.1)"};border-radius:4px;padding:3px 2px">
+        <div style="font-size:8px;color:${c.ok?"var(--green)":"var(--muted)"};font-weight:700">${c.ok?"✓":"○"}</div>
+        <div style="font-size:7.5px;color:var(--muted);line-height:1.2;margin-top:1px">${c.label}</div>
+      </div>`).join("")}
+    </div>
+  </div>
+
+  <!-- PRIMARY EMA + MACD SIGNALS -->
   <div style="background:#0d1a2e;border:1px solid rgba(59,130,246,.4);border-radius:8px;padding:10px;margin-bottom:10px">
     <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:600">PRIMARY SIGNALS</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:12px">
       <div><span style="color:var(--muted)">EMA 5</span>&nbsp;<b>${fmtPrice(s.ema5)}</b></div>
       <div><span style="color:var(--muted)">EMA 200</span>&nbsp;<b>${fmtPrice(s.ema200)}</b></div>
       <div><span style="color:var(--muted)">EMA Gap</span>&nbsp;<b style="color:${egColor}">${eg>0?"+":""}${eg.toFixed(4)}%</b></div>
-      <div><span style="color:var(--muted)">Cross Status</span>&nbsp;<b style="color:${s.bull_trend?"var(--green)":"var(--red)"}">${s.bull_trend?"▲ EMA5 > EMA200":"▼ EMA5 < EMA200"}</b></div>
+      <div><span style="color:var(--muted)">Cross</span>&nbsp;<b style="color:${s.bull_trend?"var(--green)":"var(--red)"}">${s.bull_trend?"▲ EMA5 > EMA200":"▼ EMA5 < EMA200"}</b></div>
     </div>
     <hr style="border:none;border-top:1px solid var(--border);margin:8px 0"/>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:12px">
@@ -1358,13 +1345,50 @@ function showDetail(idx){
       <div><span style="color:${macdStatusColor};font-weight:700">${macdStatus}</span></div>
     </div>
   </div>
+
+  <!-- SECONDARY INDICATORS GRID -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px">
+    <div style="background:#0d1a2e;border:1px solid var(--border);border-radius:6px;padding:8px">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:5px;font-weight:600">RSI &amp; MOMENTUM</div>
+      <div style="font-size:20px;font-weight:700;color:${s.rsi>70?"var(--red)":s.rsi<30?"var(--cyan)":s.rsi>50?"var(--green)":"var(--orange)"}">
+        ${s.rsi.toFixed(1)}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">${rsiZone}</div>
+      <div style="height:4px;background:rgba(255,255,255,.08);border-radius:2px;margin-top:6px;overflow:hidden">
+        <div style="height:100%;width:${Math.min(s.rsi,100)}%;background:${s.rsi>70?"var(--red)":s.rsi>50?"var(--green)":"var(--orange)"};border-radius:2px"></div>
+      </div>
+    </div>
+    <div style="background:#0d1a2e;border:1px solid var(--border);border-radius:6px;padding:8px">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:5px;font-weight:600">VOLUME ANALYSIS</div>
+      <div style="font-size:20px;font-weight:700;color:${s.vol_spike?"var(--green)":s.vol_ratio>=1.2?"var(--yellow)":"var(--muted)"}">
+        ${s.vol_ratio.toFixed(2)}×</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">${s.vol_spike?"Spike — strong conviction":s.vol_ratio>=1.2?"Elevated — moderate":"Below avg — weak move"}</div>
+      <div style="height:4px;background:rgba(255,255,255,.08);border-radius:2px;margin-top:6px;overflow:hidden">
+        <div style="height:100%;width:${Math.min(s.vol_ratio/3*100,100)}%;background:${s.vol_spike?"var(--green)":"var(--orange)"};border-radius:2px"></div>
+      </div>
+    </div>
+    <div style="background:#0d1a2e;border:1px solid var(--border);border-radius:6px;padding:8px">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:5px;font-weight:600">BB POSITION</div>
+      <div style="font-size:20px;font-weight:700;color:${parseFloat(bbPos)>75?"var(--red)":parseFloat(bbPos)<25?"var(--cyan)":"var(--text)"}">${bbPos}%</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">${parseFloat(bbPos)>80?"Near Upper Band":parseFloat(bbPos)<20?"Near Lower Band":"Mid-Band Zone"}</div>
+      <div style="height:4px;background:rgba(255,255,255,.08);border-radius:2px;margin-top:6px;overflow:hidden">
+        <div style="height:100%;width:${Math.min(parseFloat(bbPos)||50,100)}%;background:var(--accent);border-radius:2px"></div>
+      </div>
+    </div>
+    <div style="background:#0d1a2e;border:1px solid var(--border);border-radius:6px;padding:8px">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:5px;font-weight:600">4H TREND BIAS</div>
+      <div style="font-size:20px;font-weight:700;color:${s.h4_bull?"var(--green)":"var(--red)"}">${s.h4_bull?"BULL":"BEAR"}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">
+        ${s.h4_fresh?"🔥 Fresh 4H cross":"Established trend"}
+        ${s.h4_slope!==undefined?`&nbsp;·&nbsp;<span style="color:${h4SlopeColor}">${s.h4_slope>0?"+":""}${s.h4_slope}%</span>`:""}
+      </div>
+    </div>
+  </div>
+
   <div class="dl-grid">
     <div class="dl-row"><span class="k">Price</span><span class="v">${fmtPrice(s.price)}</span></div>
     <div class="dl-row"><span class="k">BB Mid / Upper / Lower</span><span class="v" style="font-size:11px">${fmtPrice(s.bb_mid)} / ${fmtPrice(s.bb_up)} / ${fmtPrice(s.bb_lo)}</span></div>
-    <div class="dl-row"><span class="k">RSI(14)</span><span class="v" style="color:${s.rsi>70?"var(--red)":s.rsi<30?"var(--cyan)":s.rsi>50?"var(--green)":"var(--red)"}">${s.rsi.toFixed(1)}</span></div>
     <div class="dl-row"><span class="k">EMA 50</span><span class="v" style="color:${s.above_e50?"var(--green)":"var(--red)"}">${fmtPrice(s.ema50)} ${s.above_e50?"▲ Above":"▼ Below"}</span></div>
     <div class="dl-row"><span class="k">ATR(14)</span><span class="v">${fmtPrice(s.atr)} (${s.atr_pct.toFixed(3)}%)</span></div>
-    <div class="dl-row"><span class="k">Vol Ratio</span><span class="v" style="color:${s.vol_spike?"var(--green)":"var(--muted)"}">${s.vol_ratio.toFixed(2)}× avg ${s.vol_spike?"✅":""}</span></div>
   </div>
   ${patSection}
   ${tradeLevels}
@@ -1375,6 +1399,7 @@ function showDetail(idx){
   <div style="font-size:11px;color:var(--muted);text-align:center">
     TF: ${tf} &nbsp;·&nbsp; Scanned: ${new Date().toLocaleTimeString()}
     &nbsp;·&nbsp; Confidence: <span style="color:${confColor(s.confidence)};font-weight:700">${s.confidence}%</span>
+    &nbsp;·&nbsp; Strength: <span style="color:${advColor};font-weight:700">${advScore}/100</span>
   </div>`;
 
   document.getElementById("detail-overlay").classList.add("open");
