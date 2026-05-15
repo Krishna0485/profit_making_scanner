@@ -197,11 +197,12 @@ button.live-btn.active{background:var(--red);border-color:#b91c1c;color:#fff}
         <th onclick="sortBy('tp2_p')">TP2% <span class="sort-icon">⇅</span></th>
         <th onclick="sortBy('sl_p')">SL% <span class="sort-icon">⇅</span></th>
         <th onclick="sortBy('rr')">R:R <span class="sort-icon">⇅</span></th>
+        <th>Risk</th>
         <th>Detail</th>
       </tr>
     </thead>
     <tbody id="sig-body">
-      <tr><td colspan="14" class="empty">No scan run yet. Click ▶ SCAN NOW to begin.</td></tr>
+      <tr><td colspan="15" class="empty">No scan run yet. Click ▶ SCAN NOW to begin.</td></tr>
     </tbody>
   </table>
 </div>
@@ -706,6 +707,7 @@ function evaluate(rows){
   const e5arr  =ema(C,5);
   const e200arr=ema(C,200);
   const e50arr =ema(C,50);
+  const e20arr =ema(C,20);   // EMA20 for trend structure check
   const macdD  =calcMACD(C,12,26,9);
   const bb     =bbands(C,BB_LEN,BB_MULT);
   const atrArr =atr14(H,L,C);
@@ -729,6 +731,7 @@ function evaluate(rows){
   const e5now =e5arr[n],  e5p1=e5arr[n-1], e5p3=e5arr[n-3]||e5p1;
   const e200now=e200arr[n],e200p1=e200arr[n-1];
   const e50=e50arr[n];
+  const e20=e20arr[n];
   const bb_up=bb.upper[n],bb_lo=bb.lower[n],bb_mid=bb.mid[n];
 
   // MACD(12,26,9)
@@ -746,26 +749,22 @@ function evaluate(rows){
   const volMod  =volRatio>=1.2;
 
   // ── EMA5 × EMA200 cross conditions ──
-  // Golden cross: EMA5 was ≤ EMA200, now crossed above
   const emaCrossUp=e5p1<=e200p1&&e5now>e200now;
-  // Death cross: EMA5 was ≥ EMA200, now crossed below
   const emaCrossDn=e5p1>=e200p1&&e5now<e200now;
-  // Fresh cross within last 3 bars (allows entry on same candle or 1-2 bars after)
   const freshUp=e5p3<=e200arr[n-3]&&e5now>e200now;
   const freshDn=e5p3>=e200arr[n-3]&&e5now<e200now;
-  // EMA5 vs EMA200 gap %
   const emaGapPct=pctDiff(e5now,e200now);
   const absEmaGap=Math.abs(emaGapPct);
 
   // ── MACD(12,26,9) conditions ──
-  const macdBull  =macdNow>sigNow;          // MACD line above signal
-  const macdBear  =macdNow<sigNow;          // MACD line below signal
-  const macdXUp   =macdP1<=sigP1&&macdNow>sigNow;   // MACD just crossed up
-  const macdXDn   =macdP1>=sigP1&&macdNow<sigNow;   // MACD just crossed down
-  const histPos   =histNow>0;               // histogram positive
-  const histNeg   =histNow<0;              // histogram negative
-  const histRising=histNow>histP1;         // momentum increasing
-  const histFall  =histNow<histP1;         // momentum decreasing
+  const macdBull  =macdNow>sigNow;
+  const macdBear  =macdNow<sigNow;
+  const macdXUp   =macdP1<=sigP1&&macdNow>sigNow;
+  const macdXDn   =macdP1>=sigP1&&macdNow<sigNow;
+  const histPos   =histNow>0;
+  const histNeg   =histNow<0;
+  const histRising=histNow>histP1;
+  const histFall  =histNow<histP1;
 
   // ── RSI alignment (secondary filter) ──
   const rsiBull=rsiNow>50&&rsiNow<78;
@@ -773,13 +772,37 @@ function evaluate(rows){
   const rsiXUp =rsiP1<50&&rsiNow>=50;
   const rsiXDn =rsiP1>50&&rsiNow<=50;
 
-  // ── Candle quality (anti-wick-fakeout) ──
+  // ── Candle quality ──
   const body=Math.abs(C[n]-rows[n].open),candleRange=H[n]-L[n];
   const qualityCandle=candleRange>0&&(body/candleRange)>=0.45;
+  const minBodyOk=candleRange===0||(body/candleRange)>=0.28;  // reject pure dojis
 
-  // ── EMA50 trend bias ──
+  // ── EMA structure ──
   const aboveE50=!isNaN(e50)&&price>e50;
   const belowE50=!isNaN(e50)&&price<e50;
+  const e5aboveE20=!isNaN(e20)&&e5now>e20;  // strong trend: EMA5>EMA20>EMA200
+  const e5belowE20=!isNaN(e20)&&e5now<e20;
+
+  // ── Reversal-risk helpers ──
+  // Gap widening: gap between EMA5 and EMA200 must be growing (not converging back)
+  function gapWidening(dir,lookback=3){
+    const i2=Math.max(0,n-lookback);
+    if(isNaN(e5arr[i2])||isNaN(e200arr[i2]))return true;
+    const gNow=dir==="BUY"?e5now-e200now:e200now-e5now;
+    const gOld=dir==="BUY"?e5arr[i2]-e200arr[i2]:e200arr[i2]-e5arr[i2];
+    // gOld can be negative (before cross) — that's fine, just need gNow growing
+    if(gOld<0)return true;  // gap just turned positive — still early, allow
+    return gNow>=gOld*0.80; // allow up to 20% shrinkage before flagging
+  }
+  // Price distance from EMA5: is price already pulling away from the cross?
+  const priceAboveE5=price>=e5now*0.9975;   // BUY: price must not be >0.25% below EMA5
+  const priceBelowE5=price<=e5now*1.0025;   // SELL: price must not be >0.25% above EMA5
+
+  // Recent swing high proximity for BUY (resistance nearby = reversal risk)
+  const swHi20=Math.max(...H.slice(Math.max(0,n-20),n));
+  const nearResist=price>0&&swHi20>price&&swHi20<price*1.025;  // swing high within 2.5%
+  const swLo20=Math.min(...L.slice(Math.max(0,n-20),n));
+  const nearSupport=price>0&&swLo20<price&&swLo20>price*0.975; // swing low within 2.5%
 
   // ── Levels function ──
   function levels(dir){
@@ -794,32 +817,34 @@ function evaluate(rows){
   }
 
   // ── Confidence scorer ──
-  // EMA cross + MACD together = PRIMARY (high weight)
-  // RSI/volume/quality = SECONDARY
   function conf(dir,base){
     let s=base;
-    // MACD (primary — highest weights)
     if(dir==="BUY"){
-      if(macdXUp)       s+=22; // MACD cross just happened = strongest confirmation
-      else if(macdBull) s+=14; // MACD already above signal
-      if(histPos&&histRising) s+=10; // histogram positive and growing
-      else if(histPos)        s+=5;
-      // RSI
+      if(macdXUp)            s+=18;
+      else if(macdBull)      s+=12;
+      if(histPos&&histRising)s+=8;
+      else if(histRising)    s+=4;
       if(rsiXUp)s+=8;else if(rsiBull)s+=5;
-      // Volume
-      if(volSpike)s+=15;else if(volMod)s+=6;
-      // Extra
-      if(qualityCandle)s+=6;
-      if(aboveE50)s+=5;
+      if(volSpike)s+=12;else if(volMod)s+=5;
+      if(qualityCandle)s+=5;
+      if(aboveE50)s+=4;
+      if(e5aboveE20)s+=8;             // EMA5>EMA20>EMA200 = ideal bull structure
+      if(gapWidening("BUY"))s+=6;     // gap growing = cross is holding
+      if(priceAboveE5)s+=5;           // price above EMA5 = still in push
+      if(!nearResist)s+=4;            // no resistance overhead
     }else{
-      if(macdXDn)        s+=22;
-      else if(macdBear)  s+=14;
-      if(histNeg&&histFall)s+=10;
-      else if(histNeg)     s+=5;
+      if(macdXDn)            s+=18;
+      else if(macdBear)      s+=12;
+      if(histNeg&&histFall)  s+=8;
+      else if(histFall)      s+=4;
       if(rsiXDn)s+=8;else if(rsiBear)s+=5;
-      if(volSpike)s+=15;else if(volMod)s+=6;
-      if(qualityCandle)s+=6;
-      if(belowE50)s+=5;
+      if(volSpike)s+=12;else if(volMod)s+=5;
+      if(qualityCandle)s+=5;
+      if(belowE50)s+=4;
+      if(e5belowE20)s+=8;
+      if(gapWidening("SELL"))s+=6;
+      if(priceBelowE5)s+=5;
+      if(!nearSupport)s+=4;
     }
     return Math.min(s,100);
   }
@@ -846,7 +871,13 @@ function evaluate(rows){
       vol_spike:volSpike,vol_ratio:Math.round(volRatio*100)/100,
       rsi:Math.round(rsiNow*10)/10,
       ema50:e50,above_e50:aboveE50,below_e50:belowE50,
-      bull_trend:e5now>e200now,bear_trend:e5now<e200now
+      bull_trend:e5now>e200now,bear_trend:e5now<e200now,
+      ema20:(!isNaN(e20)?Math.round(e20*1e6)/1e6:null),
+      e5_above_e20:e5aboveE20,e5_below_e20:e5belowE20,
+      gap_widening_buy:gapWidening("BUY"),gap_widening_sell:gapWidening("SELL"),
+      price_above_e5:priceAboveE5,price_below_e5:priceBelowE5,
+      near_resist:nearResist,near_support:nearSupport,
+      min_body_ok:minBodyOk
     };
   }
 
@@ -867,6 +898,13 @@ function evaluate(rows){
     // RSI extreme filter — don't chase overbought/oversold
     if(dir==="BUY"&&rsiNow>=78)return null;
     if(dir==="SELL"&&rsiNow<=22)return null;
+    // ── REVERSAL PROTECTION HARD GATES ──
+    if(!minBodyOk)return null;                        // doji candle = no conviction → skip
+    if(rc.barsAgo>=3&&!gapWidening(dir))return null;  // gap converging back = whipsaw risk
+    if(rc.barsAgo>=3){
+      if(dir==="BUY"&&!priceAboveE5)return null;      // price already dropped below EMA5
+      if(dir==="SELL"&&!priceBelowE5)return null;     // price already bounced above EMA5
+    }
     const type=rc.barsAgo<=1?"CROSSOVER":"RECENT CROSS";
     return mkSig(type,dir,null,null,rc.barsAgo);
   }
@@ -1122,7 +1160,7 @@ function renderTable(){
   });
   const tbody=document.getElementById("sig-body");
   if(!filtered.length){
-    tbody.innerHTML=`<tr><td colspan="14" class="empty">${
+    tbody.innerHTML=`<tr><td colspan="15" class="empty">${
       allSignals.length?"No signals match current filters.":"No scan run yet. Click ▶ SCAN NOW."
     }</td></tr>`;
     return;
@@ -1182,6 +1220,16 @@ function renderTable(){
                     `<span style="color:var(--red);font-size:10px">▼</span>`;
     const newCls=r.isNew?" new-row":"";
 
+    // ── Risk badge ──
+    const gapWide=isBuy?s.gap_widening_buy:s.gap_widening_sell;
+    const priceOk=isBuy?s.price_above_e5:s.price_below_e5;
+    const emaStr=isBuy?s.e5_above_e20:s.e5_below_e20;
+    const noLevel=isBuy?!s.near_resist:!s.near_support;
+    const riskN=[!gapWide,!priceOk,!emaStr,!noLevel].filter(Boolean).length;
+    const riskTxt=riskN===0?"LOW":riskN===1?"MED":riskN===2?"MED+":"HIGH";
+    const riskC=riskN===0?"var(--green)":riskN===1?"var(--yellow)":riskN===2?"var(--orange)":"var(--red)";
+    const riskBadge=`<span style="font-size:9px;font-weight:700;color:${riskC}">${riskTxt}</span>`;
+
     return `<tr class="${newCls}" data-idx="${i}">
       <td style="color:var(--muted)">${i+1}&nbsp;<b style="color:var(--text)">${rawSym}</b>&nbsp;<button onclick="openChart('${rawSym}')" style="padding:1px 5px;font-size:10px;font-weight:700;background:rgba(6,182,212,.15);border:1px solid rgba(6,182,212,.5);border-radius:4px;color:var(--cyan);cursor:pointer;letter-spacing:.3px;vertical-align:middle" title="Open ${rawSym} chart on Delta India">📊</button></td>
       <td><b>${fmtPrice(s.price)}</b></td>
@@ -1196,6 +1244,7 @@ function renderTable(){
       <td style="color:var(--green)">+${s.tp2_p}%</td>
       <td style="color:var(--red)">-${s.sl_p}%</td>
       <td style="color:var(--accent)">1:${s.rr}</td>
+      <td>${riskBadge}</td>
       <td><button onclick="showDetail(${i})" style="padding:2px 7px;font-size:11px">📋</button></td>
     </tr>`;
   }).join("");
@@ -1295,12 +1344,13 @@ function showDetail(idx){
 
   // ── Advanced Analysis: signal strength rating ──
   const advChecks=[
-    {ok:isBuy?s.bull_trend:s.bear_trend, wt:25, label:"EMA Cross Alignment"},
-    {ok:isBuy?s.macd_bull:!s.macd_bull,  wt:20, label:"MACD Direction"},
-    {ok:isBuy?s.macd_cross_up:s.macd_cross_dn, wt:10, label:"MACD Fresh Cross"},
-    {ok:s.vol_spike,                      wt:15, label:"Volume Spike"},
-    {ok:isBuy?s.rsi>50&&s.rsi<70:s.rsi<50&&s.rsi>30, wt:10, label:"RSI Zone"},
-    {ok:isBuy?s.above_e50:s.below_e50,   wt:10, label:"EMA50 Trend Filter"},
+    {ok:isBuy?s.bull_trend:s.bear_trend, wt:20, label:"EMA Cross Alignment"},
+    {ok:isBuy?s.macd_bull:!s.macd_bull,  wt:15, label:"MACD Direction"},
+    {ok:isBuy?s.macd_cross_up:s.macd_cross_dn, wt:8, label:"MACD Fresh Cross"},
+    {ok:s.vol_spike,                      wt:12, label:"Volume Spike"},
+    {ok:isBuy?s.rsi>50&&s.rsi<70:s.rsi<50&&s.rsi>30, wt:8, label:"RSI Zone"},
+    {ok:isBuy?s.e5_above_e20:s.e5_below_e20, wt:15, label:"EMA5>EMA20 Structure"},
+    {ok:isBuy?s.gap_widening_buy:s.gap_widening_sell, wt:12, label:"Gap Widening"},
     {ok:s.h4_confirmed&&(isBuy?s.h4_bull:!s.h4_bull), wt:10, label:"4H Trend Aligned"},
   ];
   const advScore=advChecks.reduce((sum,c)=>sum+(c.ok?c.wt:0),0);
@@ -1320,7 +1370,7 @@ function showDetail(idx){
       <span style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.8px">ADVANCED ANALYSIS</span>
       <span style="font-size:13px;font-weight:700;color:${advColor}">${advRating} &nbsp;${advScore}/100</span>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:3px">
       ${advChecks.map(c=>`<div style="text-align:center;background:${c.ok?"rgba(34,197,94,.12)":"rgba(255,255,255,.04)"};border:1px solid ${c.ok?"rgba(34,197,94,.4)":"rgba(255,255,255,.1)"};border-radius:4px;padding:3px 2px">
         <div style="font-size:8px;color:${c.ok?"var(--green)":"var(--muted)"};font-weight:700">${c.ok?"✓":"○"}</div>
         <div style="font-size:7.5px;color:var(--muted);line-height:1.2;margin-top:1px">${c.label}</div>
@@ -1392,6 +1442,40 @@ function showDetail(idx){
   </div>
   ${patSection}
   ${tradeLevels}
+  ${(()=>{
+    // ── REVERSAL RISK PANEL ──
+    const gapWide=isBuy?s.gap_widening_buy:s.gap_widening_sell;
+    const priceOk=isBuy?s.price_above_e5:s.price_below_e5;
+    const emaStruct=isBuy?s.e5_above_e20:s.e5_below_e20;
+    const noLevelRisk=isBuy?!s.near_resist:!s.near_support;
+    // count risk factors
+    const riskCount=[!gapWide,!priceOk,!emaStruct,!noLevelRisk].filter(Boolean).length;
+    const riskLabel=riskCount===0?"🟢 LOW RISK":riskCount===1?"🟡 LOW-MED RISK":riskCount===2?"🟠 MEDIUM RISK":"🔴 HIGH RISK";
+    const riskColor=riskCount===0?"var(--green)":riskCount===1?"var(--yellow)":riskCount===2?"var(--orange)":"var(--red)";
+    const riskBorder=riskCount===0?"rgba(34,197,94,.5)":riskCount===1?"rgba(245,158,11,.4)":riskCount===2?"rgba(249,115,22,.5)":"rgba(239,68,68,.5)";
+    const riskBg=riskCount===0?"rgba(34,197,94,.07)":riskCount===1?"rgba(245,158,11,.06)":riskCount===2?"rgba(249,115,22,.07)":"rgba(239,68,68,.08)";
+    const rows=[
+      [gapWide,
+        "✅ Gap widening — cross is holding",
+        "⚠ Gap narrowing — whipsaw / reversal risk"],
+      [priceOk,
+        isBuy?"✅ Price above EMA5 — bullish push active":"✅ Price below EMA5 — bearish push active",
+        isBuy?"⚠ Price dipped below EMA5 — momentum fading":"⚠ Price bounced above EMA5 — momentum fading"],
+      [emaStruct,
+        isBuy?"✅ EMA5 > EMA20 > EMA200 — ideal bull structure":"✅ EMA5 < EMA20 < EMA200 — ideal bear structure",
+        isBuy?"⚠ EMA5 < EMA20 — weak bull structure":"⚠ EMA5 > EMA20 — weak bear structure"],
+      [noLevelRisk,
+        isBuy?"✅ No resistance within 2.5% overhead":"✅ No support within 2.5% below",
+        isBuy?"⚠ Resistance within 2.5% — capped upside":"⚠ Support within 2.5% — may bounce"],
+    ];
+    return `<div style="background:${riskBg};border:1px solid ${riskBorder};border-radius:8px;padding:10px;margin-top:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
+        <span style="font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.8px">REVERSAL RISK</span>
+        <span style="font-size:12px;font-weight:700;color:${riskColor}">${riskLabel}</span>
+      </div>
+      ${rows.map(([ok,pos,neg])=>`<div style="font-size:11px;color:${ok?"var(--green)":"var(--orange)"};padding:2px 0">${ok?pos:neg}</div>`).join("")}
+    </div>`;
+  })()}
   <hr class="dl-divider"/>
   <div style="font-size:11px;margin-bottom:6px;color:var(--muted)">SIGNAL QUALITY CHECKS</div>
   ${checklist}
